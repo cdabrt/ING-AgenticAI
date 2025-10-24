@@ -10,7 +10,6 @@ class PDFParser:
     @staticmethod
     def extract_tables(page, pdf_file, page_num):
         all_elements = []
-        #Extract tables
         for table in page.extract_tables():
             table_text = "\n".join([" | ".join(cell if cell else "" for cell in row) for row in table])
             doc = Document(
@@ -28,7 +27,6 @@ class PDFParser:
 
         doc_to_add = None
         if last_top is not None and abs(word["top"] - last_top) > 3 and current_heading:
-            # new line → save previous heading
             doc_to_add = Document(
                 page_content=" ".join(current_heading),
                 meta_data=Metadata(source=pdf_file.name, page=page_num, type=ElementType.HEADING)
