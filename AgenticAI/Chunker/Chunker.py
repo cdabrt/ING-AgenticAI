@@ -1,11 +1,10 @@
 import re
 import uuid
-from typing import List, Optional
+from typing import List, Optional, Tuple
 from AgenticAI.Chunker.Chunk import Chunk
 from AgenticAI.PDF.Document import ElementType, Document, Metadata
 
 
-# Chunks multiple paragraphs belonging to a header together.
 class Chunker:
 
     # Splits text into rough sentence blocks using punctuation
@@ -14,26 +13,6 @@ class Chunker:
         # ., ?, ! followed by whitespace or line break
         sentences = re.split(r'(?<=[.!?])\s+', text.strip())
         return [s for s in sentences if s]
-
-    # Build the chunks
-    @staticmethod
-    def chunk_paragraph(text: str, chunk_size: int, chunk_overlap: int) -> list[str]:
-        sentences = Chunker.split_sentence(text)
-        chunks, current = [], ""
-
-        for sentence in sentences:
-            if len(current) + len(sentence) + 1 <= chunk_size:
-                current += (" " if current else "") + sentence
-            else:
-                chunks.append(current.strip())
-                # Ensure we don't take more than current length for overlap
-                safe_overlap = min(len(current), chunk_overlap)
-                tail = current[-safe_overlap:] if safe_overlap > 0 else ""
-                current = (tail + " " + sentence).strip()
-        if current.strip():
-            chunks.append(current.strip())
-
-        return chunks
 
     # Chunking a table is handled separately.
     # A row_overlap parameter is introduced to repeat some rows in the next chunk.
@@ -59,67 +38,86 @@ class Chunker:
     # Chunk all content under a single header
     @staticmethod
     def chunk_header_group(
-            current_group: List[str],
+            current_group: List[Tuple[str, Metadata]],
             chunk_size: int,
             chunk_overlap: int,
             chunks: List[Chunk],
             table_row_overlap: int,
-            current_meta: Optional[Metadata],
             parent_heading: Optional[str] = None,
     ):
-        if not current_group or not current_meta:
+        if not current_group:
             return
 
-        if current_meta.type == ElementType.TABLE:
-            for element in current_group:
-                table_chunks = Chunker.chunk_table(element, chunk_size=chunk_size, row_overlap=table_row_overlap)
-                for sub in table_chunks:
-                    chunks.append(Chunk(
-                        chunk_id=str(uuid.uuid4()),
-                        document=Document(
-                            page_content=sub,
-                            meta_data=current_meta
-                        ),
-                        char_start=0,
-                        char_end=len(sub),
-                        parent_heading=parent_heading
-                    ))
-        else:
-            # Merge paragraphs under the same header until chunk_size is reached.
-            # Overlap is applied only within the same header.
+        paragraph_buffer = ""
+        paragraph_meta: Optional[Metadata] = None
+
+        def flush_paragraph_buffer():
+            nonlocal paragraph_buffer, paragraph_meta
+            if not paragraph_buffer or paragraph_meta is None:
+                paragraph_buffer = ""
+                paragraph_meta = None
+                return
             current_chunk_text = ""
-            for para in current_group:
-                para = para.strip()
+            for para_text in paragraph_buffer.split("\n||PARA||\n"):
+                para = para_text.strip()
                 if len(current_chunk_text) + len(para) + 1 <= chunk_size:
                     current_chunk_text += (" " if current_chunk_text else "") + para
                 else:
-                    # finalize current chunk
                     chunks.append(Chunk(
                         chunk_id=str(uuid.uuid4()),
                         document=Document(
                             page_content=current_chunk_text,
-                            meta_data=current_meta
+                            meta_data=paragraph_meta
                         ),
                         char_start=0,
                         char_end=len(current_chunk_text),
                         parent_heading=parent_heading
                     ))
-                    # start new chunk with overlap
-                    overlap_text = current_chunk_text[-chunk_overlap:] if chunk_overlap > 0 else ""
+                    if chunk_overlap > 0:
+                        words = current_chunk_text.split()
+                        overlap_word_count = max(1, chunk_overlap // 6)
+                        overlap_words = words[-overlap_word_count:]
+                        overlap_text = " ".join(overlap_words)
+                    else:
+                        overlap_text = ""
                     current_chunk_text = (overlap_text + " " + para).strip()
 
             if current_chunk_text:
-                # final chunk for this header, no extra overlap
                 chunks.append(Chunk(
                     chunk_id=str(uuid.uuid4()),
                     document=Document(
                         page_content=current_chunk_text,
-                        meta_data=current_meta
+                        meta_data=paragraph_meta
                     ),
                     char_start=0,
                     char_end=len(current_chunk_text),
                     parent_heading=parent_heading
                 ))
+
+            paragraph_buffer = ""
+            paragraph_meta = None
+
+        for element_text, element_meta in current_group:
+            if element_meta.type == ElementType.TABLE:
+                flush_paragraph_buffer()
+                table_chunks = Chunker.chunk_table(element_text, chunk_size=chunk_size, row_overlap=table_row_overlap)
+                for sub in table_chunks:
+                    chunks.append(Chunk(
+                        chunk_id=str(uuid.uuid4()),
+                        document=Document(
+                            page_content=sub,
+                            meta_data=element_meta
+                        ),
+                        char_start=0,
+                        char_end=len(sub),
+                        parent_heading=parent_heading
+                    ))
+            else:
+                if paragraph_meta is None:
+                    paragraph_meta = element_meta
+                paragraph_buffer += ("\n||PARA||\n" if paragraph_buffer else "") + element_text
+
+        flush_paragraph_buffer()
 
     # Processes the entire document, header by header
     @staticmethod
@@ -131,15 +129,13 @@ class Chunker:
     ) -> List[Chunk]:
         chunks: List[Chunk] = []
         current_heading: Optional[str] = None
-        current_group: List[str] = []
-        current_meta: Optional[Metadata] = None
+        current_group: List[Tuple[str, Metadata]] = []
 
         for doc in documents:
             meta = doc.meta_data
             text = doc.page_content.strip()
 
             if meta.type == ElementType.HEADING:
-                # finalize the previous header group if any
                 if current_group:
                     Chunker.chunk_header_group(
                         current_group=current_group,
@@ -147,21 +143,14 @@ class Chunker:
                         chunk_overlap=chunk_overlap,
                         chunks=chunks,
                         table_row_overlap=table_row_overlap,
-                        current_meta=current_meta,
                         parent_heading=current_heading
                     )
 
-                # start new header group
                 current_heading = text
                 current_group = []
-                current_meta = None
             else:
-                # assign metadata for first element in the header group
-                if current_meta is None:
-                    current_meta = meta
-                current_group.append(text)
+                current_group.append((text, meta))
 
-        # finalize the last header group
         if current_group:
             Chunker.chunk_header_group(
                 current_group=current_group,
@@ -169,7 +158,6 @@ class Chunker:
                 chunk_overlap=chunk_overlap,
                 chunks=chunks,
                 table_row_overlap=table_row_overlap,
-                current_meta=current_meta,
                 parent_heading=current_heading
             )
 
