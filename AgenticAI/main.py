@@ -4,11 +4,15 @@ from AgenticAI.PDF.PDFParser import PDFParser
 if __name__ == "__main__":
     elements = PDFParser.load_structured_pdfs("./data")
 
+    CHUNK_SIZE : int = 1000
+    CHUNK_OVERLAP : int = 150
+    CHUNK_TABLE_OVERLAP : int = 1
+
     chunks = Chunker.chunk_headings_with_paragraphs(
         documents=elements,
-        chunk_size=1000,
-        chunk_overlap=150,
-        table_row_overlap=1
+        chunk_size=CHUNK_SIZE,
+        chunk_overlap=CHUNK_OVERLAP,
+        table_row_overlap=CHUNK_TABLE_OVERLAP
     )
 
     for chunk in chunks:

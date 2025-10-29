@@ -8,7 +8,7 @@ class PDFParser:
     SUBPAR_REGEX = re.compile(r"^\([a-z]+\)$|^\([ivxlcdm]+\)$|^\([a-z]{2}\)$")
 
     @staticmethod
-    def extract_tables(page, pdf_file, page_num):
+    def _extract_tables(page, pdf_file, page_num):
         all_elements = []
         for table in page.extract_tables():
             table_text = "\n".join([" | ".join(cell if cell else "" for cell in row) for row in table])
@@ -20,7 +20,7 @@ class PDFParser:
         return all_elements
 
     @staticmethod
-    def process_heading(word, current_heading, last_top, pdf_file, page_num):
+    def _process_heading(word, current_heading, last_top, pdf_file, page_num):
         is_bold = "Bold" in word["fontname"]
         if not is_bold:
             return current_heading, last_top, None
@@ -38,7 +38,7 @@ class PDFParser:
         return current_heading, last_top, doc_to_add
 
     @staticmethod
-    def process_paragraph(word, current_paragraph, pdf_file, page_num, current_type):
+    def _process_paragraph(word, current_paragraph, pdf_file, page_num, current_type):
         text = word["text"].strip()
         if not text:
             return current_paragraph, None
@@ -60,7 +60,7 @@ class PDFParser:
         return current_paragraph, doc_to_add
 
     @staticmethod
-    def extract_headings_and_paragraphs(words, pdf_file, page_num):
+    def _extract_headings_and_paragraphs(words, pdf_file, page_num):
         all_elements = []
         if not words:
             return all_elements
@@ -72,7 +72,7 @@ class PDFParser:
 
         for word in words:
             # Process headings
-            current_heading, last_top, heading_doc = PDFParser.process_heading(
+            current_heading, last_top, heading_doc = PDFParser._process_heading(
                 word, current_heading, last_top, pdf_file, page_num
             )
             if heading_doc:
@@ -80,7 +80,7 @@ class PDFParser:
 
             # If the word is not bold, process paragraphs
             if "Bold" not in word["fontname"]:
-                current_paragraph, para_doc = PDFParser.process_paragraph(
+                current_paragraph, para_doc = PDFParser._process_paragraph(
                     word, current_paragraph, pdf_file, page_num, current_type
                 )
                 if para_doc:
@@ -104,13 +104,13 @@ class PDFParser:
         return all_elements
 
     @staticmethod
-    def process_pdf(pdf_file):
+    def _process_pdf(pdf_file):
         all_elements = []
         with pdfplumber.open(pdf_file) as pdf:
             for page_num, page in enumerate(pdf.pages, start=1):
-                all_elements.extend(PDFParser.extract_tables(page, pdf_file, page_num))
+                all_elements.extend(PDFParser._extract_tables(page, pdf_file, page_num))
                 words = page.extract_words(extra_attrs=["fontname", "top"])
-                all_elements.extend(PDFParser.extract_headings_and_paragraphs(words, pdf_file, page_num))
+                all_elements.extend(PDFParser._extract_headings_and_paragraphs(words, pdf_file, page_num))
         return all_elements
 
     @staticmethod
@@ -119,6 +119,6 @@ class PDFParser:
         all_elements = []
 
         for pdf_file in pdf_dir.glob("*.pdf"):
-            all_elements.extend(PDFParser.process_pdf(pdf_file))
+            all_elements.extend(PDFParser._process_pdf(pdf_file))
 
         return all_elements
