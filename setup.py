@@ -7,6 +7,10 @@ setup(
     version="0.1.0",
     packages=find_packages(),
     install_requires=[
-        "pdfplumber"
+        "pdfplumber",
+        "sentence-transformers",
+        "numpy",
+        # Using the BaseModel superclass from pydantic to json serialize chunks and documents with ease with type validation.
+        "pydantic"
     ],
 )

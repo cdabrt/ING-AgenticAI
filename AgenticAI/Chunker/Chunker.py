@@ -4,9 +4,8 @@ from typing import List, Optional, Tuple
 from AgenticAI.Chunker.Chunk import Chunk
 from AgenticAI.PDF.Document import ElementType, Document, Metadata
 
-
+# Made static as the chunker is built from pure functions. No state or options have to be saved.
 class Chunker:
-
     # Splits text into rough sentence blocks using punctuation
     @staticmethod
     def _split_sentence(text: str) -> list[str]:

@@ -1,20 +1,16 @@
-from dataclasses import dataclass
-from enum import Enum, auto
+from enum import Enum
+from pydantic import BaseModel
 
-class ElementType(Enum):
+class ElementType(str, Enum):
     HEADING = "heading"
     PARAGRAPH = "paragraph"
     TABLE = "table"
 
-@dataclass
-class Metadata:
-    def __init__(self, source : str, page : int, type : ElementType):
-        self.source = source
-        self.page = page
-        self.type = type
+class Metadata(BaseModel):
+    source: str
+    page: int
+    type: ElementType
 
-@dataclass
-class Document:
-    def __init__(self, page_content : str, meta_data : Metadata):
-        self.page_content = page_content
-        self.meta_data = meta_data
+class Document(BaseModel):
+    page_content: str
+    meta_data: Metadata

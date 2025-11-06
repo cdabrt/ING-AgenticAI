@@ -3,6 +3,7 @@ import pdfplumber
 from pathlib import Path
 from AgenticAI.PDF.Document import Document, Metadata, ElementType
 
+# Made static as the parser is built from pure functions. No state has to be saved.
 class PDFParser:
     PAR_NUMBER_REGEX = re.compile(r"^\(\d+\)")
     SUBPAR_REGEX = re.compile(r"^\([a-z]+\)$|^\([ivxlcdm]+\)$|^\([a-z]{2}\)$")

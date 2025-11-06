@@ -1,10 +1,8 @@
-from dataclasses import dataclass
 from typing import Optional
 from AgenticAI.PDF.Document import Document
+from pydantic import BaseModel
 
-
-@dataclass
-class Chunk:
+class Chunk(BaseModel):
     chunk_id: str
     document: Document
     char_start: int
