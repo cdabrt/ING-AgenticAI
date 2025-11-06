@@ -1,6 +1,5 @@
 from typing import List, Dict
 from AgenticAI.Chunker.Chunk import Chunk
-from AgenticAI.Chunker.ChunkStore.ChunkStore import ChunkStore
 from AgenticAI.Chunker.Chunker import Chunker
 from AgenticAI.PDF.PDFParser import PDFParser
 from AgenticAI.Vectorization.VectorEmbedder import VectorEmbedder
@@ -13,11 +12,9 @@ def store_chunks_and_embeds(chunk_list : List[Chunk]):
     dimension : int = embed_tuple[0]
     chunk_vector_embed_dict : List[Dict] = embed_tuple[1]
 
-    chunk_store : ChunkStore = ChunkStore()
     # TODO: still dependency to implementation. Might need something like a simple factory if we wish to expand upon this
     vector_store : IVectorStore = FAISSStore(dimensions=dimension, use_cosine_similarity=True)
 
-    chunk_store.store_chunks(chunk_vector_embed_dict)
     vector_store.store_embeds_and_metadata(chunk_vector_embed_dict)
 
 
