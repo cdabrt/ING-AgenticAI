@@ -30,7 +30,7 @@ class FAISSStore(IVectorStore):
         self.chunk_store.extend([chunk['chunk'] for chunk in chunks_with_embeds])
 
     @override
-    def search(self, query_embedding, top_k=5):
+    def top_k_search(self, query_embedding, top_k=5):
         query_vec = numpy.array([query_embedding], dtype='float32')
         if self.use_cosine_similarity:
             faiss.normalize_L2(query_vec)
@@ -38,5 +38,5 @@ class FAISSStore(IVectorStore):
         D, I = self.index.search(query_vec, top_k)
         results = []
         for idx, score in zip(I[0], D[0]):
-            results.append({"chunk": self.chunks[idx], "score": score})
+            results.append({"chunk": self.chunk_store[idx], "score": score})
         return results

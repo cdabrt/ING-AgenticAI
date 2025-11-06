@@ -16,14 +16,23 @@ def store_chunks_and_embeds(chunk_list : List[Chunk]):
     chunk_store : ChunkStore = ChunkStore()
     vector_store : IVectorStore = FAISSStore(dimensions=dimension, use_cosine_similarity=True)
 
-    # for chunkVectorEmbed in chunkVectorEmbedDict:
-    #     print(f"id: {chunkVectorEmbed["chunk_id"]}, vector embeds: {chunkVectorEmbed["embedding"]} :")
-    #     print(f"{chunkVectorEmbed["chunk"]}")
-    #     print("-" * 80)
-
     chunk_store.store_chunks(chunk_vector_embed_dict)
     vector_store.store_embeds_and_metadata(chunk_vector_embed_dict)
 #     TODO: ADD GRAPH DB
+
+
+    test_query = "Sustainability reporting obligations for companies in the EU"
+    query_embedding = vector_embedder.model.encode([test_query], normalize_embeddings=True)[0]
+
+    results = vector_store.top_k_search(query_embedding, top_k=10)
+
+    for r in results:
+        chunk = Chunk.model_validate_json(r["chunk"])
+
+        print("Similarity score:", r["score"])
+        print("ChunkId:", chunk.chunk_id)
+        print("Chunk content:", chunk.document.page_content, "\n")
+        print("-" * 80)
 
 
 if __name__ == "__main__":
