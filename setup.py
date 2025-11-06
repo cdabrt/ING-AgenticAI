@@ -11,6 +11,7 @@ setup(
         "sentence-transformers",
         "numpy",
         # Using the BaseModel superclass from pydantic to json serialize chunks and documents with ease with type validation.
-        "pydantic"
+        "pydantic",
+        "faiss-cpu"
     ],
 )
