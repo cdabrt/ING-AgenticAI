@@ -9,5 +9,7 @@ dependencies = [
     "numpy==2.2.6",
     "pdfplumber==0.11.7",
     "pydantic==2.12.3",
+    "pymilvus>=2.6.3",
+    "python-dotenv>=1.2.1",
     "sentence-transformers==5.1.2",
 ]

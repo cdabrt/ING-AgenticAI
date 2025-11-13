@@ -9,7 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- 0.0.2 retrival by milvus
+- ui
+- api
+- integrate with llm
+
+## [0.0.2] - 2025-11-13
+
+### Added
+
+- new milvus store with sparse, dense and hybrid search
+- only used the note book to run the code
+
+### Removed
+
+- original faiss related programme is deprecated
 
 ## [0.0.1] - 2025-11-11
 
