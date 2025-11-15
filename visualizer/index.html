@@ -259,12 +259,12 @@
         docTypeEl.textContent = bundle.document_type;
         docSummaryEl.textContent = bundle.summary || "(Summary not provided)";
 
-        renderRequirementList(businessListEl, bundle.business_requirements, bundle.document);
-        renderRequirementList(dataListEl, bundle.data_requirements, bundle.document);
+        renderRequirementList(businessListEl, bundle.business_requirements);
+        renderRequirementList(dataListEl, bundle.data_requirements);
         renderAssumptions(bundle.assumptions || []);
       }
 
-      function renderRequirementList(container, requirements, documentName) {
+      function renderRequirementList(container, requirements) {
         container.innerHTML = "";
         if (!requirements || requirements.length === 0) {
           const placeholder = document.createElement("p");
@@ -293,7 +293,7 @@
           card.appendChild(rationale);
 
           if (req.document_sources && req.document_sources.length > 0) {
-            card.appendChild(createSourcesList("Document sources", req.document_sources, documentName));
+            card.appendChild(createSourcesList("Document sources", req.document_sources));
           } else {
             card.appendChild(createPlaceholder("No document citations."));
           }
@@ -323,7 +323,7 @@
         return el;
       }
 
-      function createSourcesList(label, sources, documentName) {
+      function createSourcesList(label, sources) {
         const wrapper = document.createElement("div");
         const title = document.createElement("strong");
         title.textContent = `${label}:`;
@@ -333,7 +333,7 @@
         list.className = "sources";
 
         sources.forEach((source) => {
-            const { href, text } = getSourceLink(source, documentName);
+          const { href, text } = getSourceLink(source);
             const listItem = document.createElement("li");
             if (href) {
               const link = document.createElement("a");
@@ -356,7 +356,7 @@
         return wrapper;
       }
 
-      function getSourceLink(source, documentName) {
+      function getSourceLink(source) {
         if (!source) {
           return { text: "Unknown", href: null };
         }
@@ -370,15 +370,19 @@
           }
         }
 
-        if (!documentName) {
-          return { text: source, href: null };
-        }
-
-        const pageMatch = source.match(/\(Page\s*(\d+)\)/i);
-        if (pageMatch) {
-          const page = pageMatch[1];
-          const pdfPath = `../data/${documentName}#page=${page}`;
-          return { text: source, href: pdfPath };
+        const pageMatch = source.match(/page\s*(\d+)/i);
+        const fileMatch = source.match(/(.+?\.pdf)/i);
+        if (fileMatch) {
+          const fileName = fileMatch[1].trim();
+          const encoded = fileName
+            .split("/")
+            .map((segment) => encodeURIComponent(segment))
+            .join("/");
+          let href = `../data/${encoded}`;
+          if (pageMatch) {
+            href += `#page=${pageMatch[1]}`;
+          }
+          return { text: source, href };
         }
 
         return { text: source, href: null };
