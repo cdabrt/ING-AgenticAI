@@ -12,6 +12,14 @@ setup(
         "numpy",
         # Using the BaseModel superclass from pydantic to json serialize chunks and documents with ease with type validation.
         "pydantic",
-        "faiss-cpu"
+        "faiss-cpu",
+        "langchain",
+        "langgraph",
+        "langchain-google-genai",
+        "ddgs",
+        "modelcontextprotocol",
+        "python-dotenv",
+        "httpx",
+        "beautifulsoup4",
     ],
 )

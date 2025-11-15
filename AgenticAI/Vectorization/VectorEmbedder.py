@@ -1,17 +1,22 @@
+import os
 from typing import List, Dict
+
 from sentence_transformers import SentenceTransformer
+
 from AgenticAI.Chunker.Chunk import Chunk
 
 
 class VectorEmbedder:
-    def __init__(self, model_name:str = "all-MiniLM-L6-v2"):
-        self.model = SentenceTransformer(model_name)
+    def __init__(self, model_name: str | None = None):
+        resolved_name = model_name or os.getenv("EMBEDDING_MODEL_NAME", "all-MiniLM-L6-v2")
+        self.model_name = resolved_name
+        self.model = SentenceTransformer(resolved_name)
 
-    def embed_vectors_in_chunks(self, chunks:List[Chunk]) -> tuple[int, List[Dict]]:
+    def embed_vectors_in_chunks(self, chunks: List[Chunk]) -> tuple[int, List[Dict]]:
         texts = [chunk.document.page_content for chunk in chunks]
         embeddings = self.model.encode(texts, normalize_embeddings=True)
 
-        list_output : List[Dict] = []
+        list_output: List[Dict] = []
         for chunk, emb in zip(chunks, embeddings):
             doc = {
                 "chunk_id": chunk.chunk_id,
@@ -23,6 +28,8 @@ class VectorEmbedder:
             list_output.append(doc)
 
         return embeddings[0].shape[0], list_output
+    def embed_queries(self, queries: List[str]):
+        return self.model.encode(queries, normalize_embeddings=True)
 
 
 

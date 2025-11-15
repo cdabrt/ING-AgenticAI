@@ -1,0 +1,25 @@
+# Environment & secrets
+.env
+.env.*
+
+# Python build artifacts
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+build/
+dist/
+
+# IDE/editor noise
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Local data and outputs
+data/*.cache
+artifacts/
+
+# Misc
+logs/
