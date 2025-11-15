@@ -1,7 +1,7 @@
 import re
 import pdfplumber
 from pathlib import Path
-from AgenticAI.PDF.Document import Document, Metadata, ElementType
+from PDF.Document import Document, Metadata, ElementType
 
 # Made static as the parser is built from pure functions. No state has to be saved.
 class PDFParser:

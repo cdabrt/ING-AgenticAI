@@ -13,8 +13,8 @@ from pymilvus import (
     WeightedRanker,
 )
 from sentence_transformers import CrossEncoder
-from AgenticAI.Vectorization.StoredChunk import StoredChunk
-from AgenticAI.Vectorization.vectorStore.VectorStoreAdapter import IVectorStore
+from Vectorization.StoredChunk import StoredChunk
+from Vectorization.vectorStore.VectorStoreAdapter import IVectorStore
 
 logger = logging.getLogger(__name__)
 

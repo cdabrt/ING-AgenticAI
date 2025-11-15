@@ -2,8 +2,8 @@ import faiss
 import numpy
 from typing import override, List, Dict
 
-from AgenticAI.Chunker.Chunk import Chunk
-from AgenticAI.Vectorization.vectorStore.VectorStoreAdapter import IVectorStore
+from Chunker.Chunk import Chunk
+from Vectorization.vectorStore.VectorStoreAdapter import IVectorStore
 
 
 class FAISSStore(IVectorStore):

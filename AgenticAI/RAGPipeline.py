@@ -3,13 +3,14 @@ import logging
 from typing import List, Dict
 from dotenv import load_dotenv
 import os
-from AgenticAI.Chunker.Chunk import Chunk
-from AgenticAI.Chunker.Chunker import Chunker
-from AgenticAI.PDF.PDFParser import PDFParser
-from AgenticAI.Vectorization.StoredChunk import StoredChunk
-from AgenticAI.Vectorization.VectorEmbedder import VectorEmbedder
-from AgenticAI.Vectorization.vectorStore.faiss.FAISS import FAISSStore
-from AgenticAI.Vectorization.vectorStore.VectorStoreAdapter import IVectorStore
+from Chunker.Chunk import Chunk
+from Chunker.Chunker import Chunker
+from PDF.PDFParser import PDFParser
+from Vectorization.StoredChunk import StoredChunk
+from Vectorization.VectorEmbedder import VectorEmbedder
+from Vectorization.vectorStore.faiss.FAISS import FAISSStore
+from Vectorization.vectorStore.VectorStoreAdapter import IVectorStore
+from Vectorization.vectorStore.milvus.MilvusStore import MilvusStore
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
@@ -43,17 +44,22 @@ def store_chunks_and_embeds(chunk_list: List[Chunk]):
 if __name__ == "__main__":
     load_dotenv()
 
-    elements = PDFParser.load_structured_pdfs("../data")
+    # elements = PDFParser.load_structured_pdfs("../data")
 
-    CHUNK_SIZE: int = 1000
-    CHUNK_OVERLAP: int = 150
-    CHUNK_TABLE_OVERLAP: int = 1
-    chunks = Chunker.chunk_headings_with_paragraphs(
-        documents=elements,
-        chunk_size=CHUNK_SIZE,
-        chunk_overlap=CHUNK_OVERLAP,
-        table_row_overlap=CHUNK_TABLE_OVERLAP
-    )
-    stored_chunks = [StoredChunk.map_chunk(chunk).model_dump() for chunk in chunks]
-    with open('../data/data.json', 'w', encoding="utf-8") as file:
-        file.write(json.dumps(stored_chunks, ensure_ascii=False))
+    # CHUNK_SIZE: int = 1000
+    # CHUNK_OVERLAP: int = 150
+    # CHUNK_TABLE_OVERLAP: int = 1
+    # chunks = Chunker.chunk_headings_with_paragraphs(
+    #     documents=elements,
+    #     chunk_size=CHUNK_SIZE,
+    #     chunk_overlap=CHUNK_OVERLAP,
+    #     table_row_overlap=CHUNK_TABLE_OVERLAP
+    # )
+    # stored_chunks = [StoredChunk.map_chunk(chunk).model_dump() for chunk in chunks]
+    # with open('../data/data.json', 'w', encoding="utf-8") as file:
+    #     file.write(json.dumps(stored_chunks, ensure_ascii=False))
+
+    print("Loading stored chunks...")
+    mil = MilvusStore(os.getenv("MILVUS_URI"), os.getenv("MILVUS_TOKEN"), os.getenv("MILVUS_COLLECTION"))
+    ret = mil.top_k_sparse_search("Sustainability reporting obligations for companies in the EU", top_k=5)
+    print(ret)

@@ -1,5 +1,5 @@
 from typing import Optional
-from AgenticAI.PDF.Document import Document
+from PDF.Document import Document
 from pydantic import BaseModel
 
 class Chunk(BaseModel):
