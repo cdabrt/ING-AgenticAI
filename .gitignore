@@ -1,6 +1,5 @@
 # Environment & secrets
 .env
-.env.*
 
 # Python build artifacts
 __pycache__/
