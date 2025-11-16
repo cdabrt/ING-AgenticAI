@@ -24,6 +24,33 @@ class WebResult(BaseModel):
     title: Optional[str]
     snippet: Optional[str]
     href: Optional[str]
+    content: Optional[str]
+    selection_reason: Optional[str]
+    inclusion_reason: Optional[str]
+    summary: Optional[str]
+
+
+class WebSourceCandidate(BaseModel):
+    identifier: str = Field(..., description="Internal reference for the candidate result")
+    title: Optional[str]
+    snippet: Optional[str]
+    href: Optional[str]
+
+
+class WebSourceSelection(BaseModel):
+    identifier: str = Field(..., description="Candidate identifier being evaluated")
+    fetch: bool = Field(..., description="True if the agent wants to load the page content")
+    rationale: str = Field(..., description="Why this decision was taken")
+
+
+class WebSelectionResponse(BaseModel):
+    selections: List[WebSourceSelection]
+
+
+class WebContentDecision(BaseModel):
+    include: bool = Field(..., description="Whether the cleaned page should augment context")
+    rationale: str = Field(..., description="Justification for including or dropping the page")
+    summary: str = Field(..., description="Two-sentence synopsis highlighting the relevant insight")
 
 
 class ContextAssessment(BaseModel):

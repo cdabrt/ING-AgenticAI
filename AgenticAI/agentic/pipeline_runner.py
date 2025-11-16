@@ -12,6 +12,7 @@ from dotenv import load_dotenv
 from langchain_google_genai import ChatGoogleGenerativeAI
 
 from AgenticAI.PDF.PDFParser import PDFParser
+from AgenticAI.agentic.decision_logger import DecisionLogger
 from AgenticAI.agentic.documents import group_documents_by_source
 from AgenticAI.agentic.langgraph_runner import AgenticGraphRunner, AgenticState
 from AgenticAI.mcp.client import MCPToolClient
@@ -53,6 +54,11 @@ def parse_args() -> argparse.Namespace:
         default="artifacts/requirements.json",
         help="Path where the consolidated requirements JSON will be saved",
     )
+    parser.add_argument(
+        "--decision-log",
+        default="artifacts/agent_decisions.jsonl",
+        help="Path to the JSONL file where agent decisions will be appended",
+    )
     return parser.parse_args()
 
 
@@ -81,6 +87,8 @@ async def run_pipeline(args: argparse.Namespace):
     doc_types: List[str] = []
     doc_names: List[str] = []
 
+    decision_logger = DecisionLogger(args.decision_log)
+
     server_script = args.server_script
     server_env = {"VECTOR_STORE_DIR": str(Path(vector_dir).resolve())}
 
@@ -90,6 +98,7 @@ async def run_pipeline(args: argparse.Namespace):
             requirements_model=requirements_model,
             mcp_client=mcp_client,
             retrieval_top_k=args.top_k,
+            decision_logger=decision_logger,
         )
 
         for doc in grouped_docs:

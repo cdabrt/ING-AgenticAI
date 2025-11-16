@@ -4,7 +4,7 @@ import logging
 import os
 import sys
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import httpx
 from bs4 import BeautifulSoup
@@ -111,7 +111,11 @@ async def _fetch_page_text(
     return _clean_text(text, max_chars)
 
 
-async def _run_ddg_search(query: str, max_results: int) -> List[Dict[str, str]]:
+async def _run_ddg_search(
+    query: str,
+    max_results: int,
+    include_content: bool = False,
+) -> List[Dict[str, Optional[str]]]:
     def _search():
         with DDGS() as ddgs:
             return list(ddgs.text(query, max_results=max_results))
@@ -120,13 +124,17 @@ async def _run_ddg_search(query: str, max_results: int) -> List[Dict[str, str]]:
     if not results:
         return []
 
-    async with httpx.AsyncClient(timeout=httpx.Timeout(10.0)) as client:
-        contents = await asyncio.gather(
-            *[_fetch_page_text(client, item.get("href")) for item in results],
-            return_exceptions=False,
-        )
+    contents: List[str | None]
+    if include_content:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(10.0)) as client:
+            contents = await asyncio.gather(
+                *[_fetch_page_text(client, item.get("href")) for item in results],
+                return_exceptions=False,
+            )
+    else:
+        contents = [None for _ in results]
 
-    formatted: List[Dict[str, str]] = []
+    formatted: List[Dict[str, Optional[str]]] = []
     for item, content in zip(results, contents):
         formatted.append(
             {
@@ -155,14 +163,33 @@ async def retrieve_chunks(query: str, top_k: int = 8) -> str:
 
 
 @mcp.tool()
-async def web_search(query: str, num_results: int = 5) -> str:
-    """Search the open web for additional compliance or regulatory references."""
+async def web_search(query: str, num_results: int = 5, include_content: bool = False) -> str:
+    """Search the open web for additional compliance or regulatory references.
+
+    By default, only metadata is returned so the agent can pre-screen results. Set include_content
+    to true to fetch and clean the body text for each candidate in a single call.
+    """
 
     if num_results < 1:
         num_results = 1
 
-    results = await _run_ddg_search(query=query, max_results=num_results)
+    results = await _run_ddg_search(query=query, max_results=num_results, include_content=include_content)
     return json.dumps({"query": query, "results": results})
+
+
+@mcp.tool()
+async def fetch_web_page(url: str, max_chars: int = MAX_WEB_CONTENT_CHARS) -> str:
+    """Fetch and sanitize a single web page for inclusion in context."""
+
+    async with httpx.AsyncClient(timeout=httpx.Timeout(10.0)) as client:
+        content = await _fetch_page_text(client, url, max_chars)
+
+    payload = {
+        "href": url,
+        "content": content,
+        "content_length": len(content),
+    }
+    return json.dumps(payload)
 
 
 def main():
