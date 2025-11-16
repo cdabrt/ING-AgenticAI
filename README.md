@@ -5,10 +5,10 @@
 The project now delivers an end-to-end agentic RAG workflow tailored for regulatory intelligence. At a high level:
 
 - **Ingestion** – `AgenticAI.pipeline.ingestion` parses PDFs with `pdfplumber`, chunks them, embeds text with SentenceTransformers, and persists a FAISS index plus metadata under `artifacts/vector_store`.
-- **MCP tooling** – `AgenticAI/mcp_servers/regulation_server.py` exposes two MCP tools via FastMCP: `retrieve_chunks` (FAISS semantic search) and `web_search` (DuckDuckGo + html2text). They are consumed through `AgenticAI.mcp.client.MCPToolClient`, so every retrieval or open-web lookup stays behind the MCP boundary.
-- **LangGraph agents** – `AgenticAI.agentic.langgraph_runner.AgenticGraphRunner` wires a small LangGraph (`query_agent → retrieval → context → requirements → END`) across two Gemini models (Flash + Pro) and the MCP tools.
-
-All orchestration, including MCP server lifecycle, happens in `AgenticAI.agentic.pipeline_runner`, which loops through uploaded documents one-by-one and records consolidated requirements to `artifacts/requirements.json`.
+- **MCP tooling** – `AgenticAI/mcp_servers/regulation_server.py` exposes three FastMCP tools: `retrieve_chunks` (FAISS semantic search), `web_search` (DuckDuckGo metadata feed), and `fetch_web_page` (sanitized HTML fetch capped at 4k characters). They are consumed exclusively through `AgenticAI.mcp.client.MCPToolClient`, so every retrieval or open-web lookup stays behind the MCP boundary.
+- **LangGraph agents** – `AgenticAI.agentic.langgraph_runner.AgenticGraphRunner` wires a LangGraph (`query_agent → retrieval → context → requirements → END`) across two Gemini models (Flash + Pro) plus helper chains that vet web candidates before fetching.
+- **Decision logging** – `AgenticAI.agentic.decision_logger.DecisionLogger` streams every step (queries, retrieval hits, screening decisions, requirement counts) to `artifacts/agent_decisions.jsonl` for auditability.
+- **Orchestration** – `AgenticAI.agentic.pipeline_runner` handles ingestion checks, starts the MCP server, runs per-document LangGraph passes, aggregates summaries/chunks, and writes the consolidated requirements bundle to `artifacts/requirements.json`.
 
 ### Agent orchestration in detail
 
@@ -24,15 +24,26 @@ All orchestration, including MCP server lifecycle, happens in `AgenticAI.agentic
 	- Duplicate hits from the same `source`/`page` pair are collapsed, keeping only the highest-scoring chunk so downstream prompts stay concise.
 	- The MCP tool embeds the query with the persisted SentenceTransformer model, performs FAISS search, and returns chunk metadata. Each row is validated via the `RetrievalChunk` model before being appended to `state["retrieval_results"]`.
 
-3. **`_context_node` (context assessor)**
-	- Model: Same Gemini Flash instance but with a different prompt instructing it to decide whether additional context is needed.
+3. **`_context_node` (context assessor + open-web gatekeeper)**
+	- Model: Same Gemini Flash instance but with a different prompt instructing it to decide whether additional context is required.
 	- Output: `ContextAssessment` containing the boolean `needs_additional_context`, up to three `missing_information_queries`, and an explanation.
-	- Tools: If `needs_additional_context` is `True`, the node invokes `web_search` per missing query (max three). The MCP server runs DuckDuckGo, fetches each result with `httpx`, strips markup, and returns a `WebResult` list. These are stored under `state["web_context"]`.
+	- Tools & guards: When gaps remain, the node runs a multi-stage triage: (1) call `web_search` for metadata-only hits, (2) score each candidate via `_screen_web_candidates`, (3) fetch only the approved URLs using `fetch_web_page`, and (4) vet the cleaned articles with `_evaluate_web_content`. Only pages that pass all four gates populate `state["web_context"]` along with rationales.
 
 4. **`_requirements_node` (Agent 2 – regulatory implementation architect)**
 	- Model: Gemini Pro (`ChatGoogleGenerativeAI` with temperature 0.1).
 	- Prompt: Receives document metadata, the JSON-serialized retrieval chunks, and any web context. It emits a `RequirementBundle` with structured business/data requirements, rationales, and citations (chunk IDs/URLs) plus assumptions.
 	- Tools: Consumes previously gathered context only; no additional tool calls are made here.
+
+### Open-web triage pipeline
+
+The context node’s helper chains keep enrichment lean and defensible:
+
+1. **Metadata search (`web_search`)** – DuckDuckGo returns title/snippet/URL without body text so the agent can reason about quality before fetching.
+2. **Screening (`_screen_web_candidates`)** – Gemini Flash evaluates each snippet and decides whether it is worth fetching, logging the rationale.
+3. **Fetching (`fetch_web_page`)** – Approved URLs are pulled through the MCP server, which strips boilerplate and truncates content to 4k characters.
+4. **Content vetting (`_evaluate_web_content`)** – Gemini Flash reviews the cleaned article and only approves it if it adds concrete obligations or thresholds.
+
+Every approval/rejection is appended to `artifacts/agent_decisions.jsonl`, making downstream auditing straightforward.
 
 ### Document vs. portfolio workflow
 
@@ -43,8 +54,19 @@ All orchestration, including MCP server lifecycle, happens in `AgenticAI.agentic
 ### Tool visibility and permissions
 
 - Only the retrieval node ever calls `retrieve_chunks`.
-- Only the context node conditionally calls `web_search` (maximum three queries per document).
+- Only the context node conditionally calls `web_search` **and** `fetch_web_page`, capped at three seed queries per document and protected by the triage gates above.
 - Agents never bypass MCP: they interact solely via `MCPToolClient`, which keeps a single stdio session open for the duration of the pipeline run.
+
+### Decision telemetry
+
+`DecisionLogger` captures a structured JSONL trail that includes:
+
+- LangGraph outputs (queries generated, document types, requirement counts).
+- Retrieval calls (query string, chunk IDs, scores).
+- Open-web screening/fetching decisions with rationales.
+- Final requirement bundle metadata (business/data requirement counts, assumptions).
+
+Inspect `artifacts/agent_decisions.jsonl` to replay the agent’s reasoning or feed the events into downstream analytics.
 
 ### LLM context lifecycle
 
@@ -106,7 +128,7 @@ For a friendlier view of the generated requirements, a static viewer lives under
 ## Project layout
 
 - `AgenticAI/pipeline/ingestion.py` – ingestion & FAISS persistence helpers.
-- `AgenticAI/mcp_servers/regulation_server.py` – FastMCP server exposing retrieval + web search tools.
+- `AgenticAI/mcp_servers/regulation_server.py` – FastMCP server exposing retrieval, metadata search, and fetch tools.
 - `AgenticAI/mcp/client.py` – lightweight stdio MCP client for the LangGraph runner.
 - `AgenticAI/agentic/*` – document grouping utilities, Pydantic schemas, and LangGraph orchestration.
 - `AgenticAI/agentic/pipeline_runner.py` – main entrypoint that ties everything together.
