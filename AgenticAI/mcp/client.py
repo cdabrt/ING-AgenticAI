@@ -1,10 +1,14 @@
 import json
+import logging
 import sys
 from contextlib import AsyncExitStack
 from typing import Any, Dict, List, Optional
 
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
+
+
+logger = logging.getLogger(__name__)
 
 
 class MCPToolClient:
@@ -21,14 +25,17 @@ class MCPToolClient:
         if not self.server_script.endswith(".py"):
             raise ValueError("Only python-based MCP servers are currently supported")
 
+        logger.info("Launching MCP server %s", self.server_script)
         params = StdioServerParameters(command=sys.executable, args=[self.server_script], env=self.env)
         self._transport = await self.exit_stack.enter_async_context(stdio_client(params))
         stdio, write = self._transport
         self.session = await self.exit_stack.enter_async_context(ClientSession(stdio, write))
         await self.session.initialize()
+        logger.info("MCP session initialized for %s", self.server_script)
         return self
 
     async def __aexit__(self, exc_type, exc, tb):
+        logger.info("Shutting down MCP server %s", self.server_script)
         await self.exit_stack.aclose()
         self.session = None
         self._transport = None
@@ -37,6 +44,7 @@ class MCPToolClient:
         if not self.session:
             raise RuntimeError("MCP session has not been initialized")
 
+        logger.info("Calling MCP tool=%s args=%s", tool_name, list(arguments.keys()))
         result = await self.session.call_tool(tool_name, arguments)
         return self._extract_text(result.content)
 
@@ -45,6 +53,7 @@ class MCPToolClient:
             raise RuntimeError("MCP session has not been initialized")
 
         response = await self.session.list_tools()
+        logger.info("Discovered MCP tools: %s", ", ".join(tool.name for tool in response.tools))
         return [tool.name for tool in response.tools]
 
     @staticmethod

@@ -20,7 +20,8 @@ All orchestration, including MCP server lifecycle, happens in `AgenticAI.agentic
 	- Tools: None. This node is pure model inference.
 
 2. **`_retrieval_node` (deterministic vector search)**
-	- For each query from Agent 1, calls `MCPToolClient.call_tool("retrieve_chunks", {"query": query, "top_k": retrieval_top_k})`.
+	- For each query from Agent 1, calls `MCPToolClient.call_tool("retrieve_chunks", {"query": query, "top_k": retrieval_top_k})` (default 15).
+	- Duplicate hits from the same `source`/`page` pair are collapsed, keeping only the highest-scoring chunk so downstream prompts stay concise.
 	- The MCP tool embeds the query with the persisted SentenceTransformer model, performs FAISS search, and returns chunk metadata. Each row is validated via the `RetrievalChunk` model before being appended to `state["retrieval_results"]`.
 
 3. **`_context_node` (context assessor)**
@@ -98,7 +99,7 @@ For a friendlier view of the generated requirements, a static viewer lives under
 ## Useful CLI flags
 
 - `--rebuild-store` – force ingestion even if a vector store already exists.
-- `--top-k` – number of FAISS chunks fetched per query.
+- `--top-k` – number of FAISS chunks fetched per query (default 15).
 - `--server-script` – run a custom MCP server implementation if needed.
 - `--output` – change the output JSON path.
 

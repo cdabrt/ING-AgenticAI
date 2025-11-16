@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Dict, List, TypedDict
+from typing import Any, Dict, List, Tuple, TypedDict, cast
 
 from langchain_core.output_parsers import PydanticOutputParser
 from langchain_core.prompts import ChatPromptTemplate
@@ -115,8 +115,9 @@ class AgenticGraphRunner:
         for query in state.get("queries", []):
             payload = await self.mcp_client.call_tool("retrieve_chunks", {"query": query, "top_k": self.retrieval_top_k})
             data = json.loads(payload)
+            deduped_results = self._dedupe_chunks(data.get("results", []))
             chunk_ids: List[str] = []
-            for row in data.get("results", []):
+            for row in deduped_results:
                 chunk = RetrievalChunk.model_validate(row)
                 retrieved_chunks.append(chunk.model_dump())
                 chunk_ids.append(chunk.chunk_id)
@@ -130,6 +131,26 @@ class AgenticGraphRunner:
                 },
             )
         return {"retrieval_results": retrieved_chunks}
+
+    @staticmethod
+    def _dedupe_chunks(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Collapse duplicate chunks from the same source/page while keeping the best score."""
+
+        best_by_location: Dict[Tuple[Any, Any], Dict[str, Any]] = {}
+        order: List[Tuple[Any, Any]] = []
+
+        for row in rows:
+            key = (row.get("source"), row.get("page"))
+            current_best = best_by_location.get(key)
+            if current_best is None:
+                best_by_location[key] = row
+                order.append(key)
+                continue
+
+            if row.get("score", 0) > current_best.get("score", 0):
+                best_by_location[key] = row
+
+        return [best_by_location[key] for key in order]
 
     async def _context_node(self, state: AgenticState) -> AgenticState:
         parser = PydanticOutputParser(pydantic_object=ContextAssessment)
@@ -361,7 +382,7 @@ class AgenticGraphRunner:
                     " Use the retrieved document chunks (and any enriched web context) to translate legal obligations into actionable business and data requirements."
                     " Address governance, risk management, assurance, reporting formats, and data collection duties relevant to lending, investment, and underwriting activities."
                     " Cite chunk IDs/pages for every document-driven statement and include online citations whenever external context informed the requirement."
-                    " Format every entry in `document_sources` exactly as `{source}, page {page_number}, chunk {chunk_id}` using the values from the provided retrieval chunks."
+                    " Format every entry in `document_sources` exactly as `{{source}}, page {{page_number}}, chunk {{chunk_id}}` using the values from the provided retrieval chunks."
                     " If a page number is missing, write `page unknown` but always keep the chunk identifier in the same format."
                     " Respond strictly with the JSON schema described in the instructions so downstream systems can ingest your output.",
                 ),
@@ -400,7 +421,8 @@ class AgenticGraphRunner:
         return {"requirements": bundle.model_dump()}
 
     async def arun(self, state: AgenticState) -> AgenticState:
-        return await self.graph.ainvoke(state)
+        result = await self.graph.ainvoke(state)
+        return cast(AgenticState, result)
 
     async def process_document(self, state: AgenticState) -> AgenticState:
         """Run query, retrieval, and context nodes for a single document."""

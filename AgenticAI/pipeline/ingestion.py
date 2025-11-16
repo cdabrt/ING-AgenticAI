@@ -2,7 +2,7 @@ import json
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, Iterator, List
 
 from AgenticAI.Chunker.Chunk import Chunk
 from AgenticAI.Chunker.Chunker import Chunker
@@ -17,6 +17,13 @@ def _write_store_config(target_dir: Path, config: Dict):
     config_path = target_dir / "store_config.json"
     with config_path.open("w", encoding="utf-8") as handle:
         json.dump(config, handle, indent=2)
+
+
+def _batched_chunks(chunks: List[Chunk], batch_size: int) -> Iterator[List[Chunk]]:
+    if batch_size <= 0:
+        raise ValueError("batch_size must be greater than zero")
+    for start in range(0, len(chunks), batch_size):
+        yield chunks[start:start + batch_size]
 
 
 def vector_store_exists(persist_dir: str) -> bool:
@@ -36,33 +43,62 @@ def ingest_documents(
     chunk_size: int = 1000,
     chunk_overlap: int = 150,
     table_row_overlap: int = 1,
+    embedding_batch_size: int = 64,
 ) -> Dict:
     data_path = Path(data_dir)
     if not data_path.exists():
         raise FileNotFoundError(f"Data directory {data_dir} does not exist")
 
-    logger.info("Loading PDFs from %s", data_dir)
-    documents = PDFParser.load_structured_pdfs(data_dir)
-    if not documents:
-        raise ValueError(f"No PDF content found in {data_dir}")
+    if embedding_batch_size <= 0:
+        raise ValueError("embedding_batch_size must be greater than zero")
 
-    logger.info("Chunking %s document elements", len(documents))
-    chunks: List[Chunk] = Chunker.chunk_headings_with_paragraphs(
-        documents=documents,
-        chunk_size=chunk_size,
-        chunk_overlap=chunk_overlap,
-        table_row_overlap=table_row_overlap,
-    )
+    pdf_files = sorted(data_path.glob("*.pdf"))
+    if not pdf_files:
+        raise ValueError(f"No PDF files found in {data_dir}")
 
-    if not chunks:
-        raise ValueError("Chunker did not return any chunks — check input documents")
-
-    logger.info("Embedding %s chunks", len(chunks))
     vector_embedder = VectorEmbedder()
-    dimension, chunk_vector_embed_dict = vector_embedder.embed_vectors_in_chunks(chunks)
+    vector_store: FAISSStore | None = None
+    embedding_dimension: int | None = None
+    total_chunk_count = 0
+    total_element_count = 0
 
-    vector_store = FAISSStore(dimensions=dimension, use_cosine_similarity=True)
-    vector_store.store_embeds_and_metadata(chunk_vector_embed_dict)
+    logger.info("Processing %s PDF files from %s", len(pdf_files), data_dir)
+
+    for pdf_file in pdf_files:
+        logger.info("Parsing %s", pdf_file.name)
+        documents = PDFParser.load_structured_pdf(pdf_file)
+        total_element_count += len(documents)
+
+        if not documents:
+            logger.warning("Skipping %s — parser returned no elements", pdf_file.name)
+            continue
+
+        chunks: List[Chunk] = Chunker.chunk_headings_with_paragraphs(
+            documents=documents,
+            chunk_size=chunk_size,
+            chunk_overlap=chunk_overlap,
+            table_row_overlap=table_row_overlap,
+        )
+
+        if not chunks:
+            logger.warning("Skipping %s — chunker returned no chunks", pdf_file.name)
+            continue
+
+        total_chunk_count += len(chunks)
+        logger.info("Embedding %s chunks from %s", len(chunks), pdf_file.name)
+
+        for batch in _batched_chunks(chunks, embedding_batch_size):
+            dimension, chunk_vector_embed_dict = vector_embedder.embed_vectors_in_chunks(batch)
+            if vector_store is None:
+                vector_store = FAISSStore(dimensions=dimension, use_cosine_similarity=True)
+                embedding_dimension = dimension
+            elif vector_store.dimensions != dimension:
+                raise ValueError("Embedding dimension changed between batches; aborting ingestion")
+
+            vector_store.store_embeds_and_metadata(chunk_vector_embed_dict)
+
+    if vector_store is None or embedding_dimension is None or total_chunk_count == 0:
+        raise ValueError("No chunks were ingested; ensure the input PDFs contain parsable content")
 
     target_dir = Path(persist_dir)
     target_dir.mkdir(parents=True, exist_ok=True)
@@ -75,18 +111,26 @@ def ingest_documents(
         "chunk_size": chunk_size,
         "chunk_overlap": chunk_overlap,
         "table_row_overlap": table_row_overlap,
-        "dimension": dimension,
-        "chunk_count": len(chunks),
+        "embedding_batch_size": embedding_batch_size,
+        "dimension": embedding_dimension,
+        "chunk_count": total_chunk_count,
+        "parsed_elements": total_element_count,
         "generated_at": datetime.utcnow().isoformat() + "Z",
         "data_dir": str(data_path.resolve()),
     }
     _write_store_config(target_dir, store_config)
 
-    logger.info("Persisted vector store with %s chunks to %s", len(chunks), persist_dir)
+    logger.info(
+        "Persisted vector store with %s chunks from %s parsed elements to %s",
+        total_chunk_count,
+        total_element_count,
+        persist_dir,
+    )
 
     return {
-        "chunks": len(chunks),
-        "documents": len(documents),
+        "chunks": total_chunk_count,
+        "documents": total_element_count,
+        "pdf_files": len(pdf_files),
         "persist_dir": persist_dir,
         "store_config": store_config,
     }

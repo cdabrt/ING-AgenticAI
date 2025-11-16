@@ -5,6 +5,8 @@ import asyncio
 import json
 import logging
 import os
+import platform
+from importlib import metadata
 from pathlib import Path
 from typing import List
 
@@ -21,12 +23,42 @@ from AgenticAI.pipeline.ingestion import ingest_documents, vector_store_exists
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
+PACKAGE_PROBES = (
+    "langchain",
+    "langgraph",
+    "langchain-google-genai",
+    "google-generativeai",
+    "google-ai-generativelanguage",
+    "modelcontextprotocol",
+    "mcp",
+)
+
 
 def _ensure_gemini_key():
     api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
     if not api_key:
         raise EnvironmentError("Set GEMINI_API_KEY (or GOOGLE_API_KEY) before running the pipeline")
     os.environ.setdefault("GOOGLE_API_KEY", api_key)
+    logger.info("LLM key loaded (GEMINI_API_KEY present=%s, GOOGLE_API_KEY present=%s)", bool(os.getenv("GEMINI_API_KEY")), bool(os.getenv("GOOGLE_API_KEY")))
+
+
+def _log_runtime_context(data_dir: str, vector_dir: str):
+    logger.info(
+        "Runtime context: python=%s, platform=%s, working_dir=%s",
+        platform.python_version(),
+        platform.platform(),
+        os.getcwd(),
+    )
+    versions: List[str] = []
+    for package in PACKAGE_PROBES:
+        try:
+            versions.append(f"{package}={metadata.version(package)}")
+        except metadata.PackageNotFoundError:
+            versions.append(f"{package}=missing")
+    logger.info("Key packages: %s", ", ".join(versions))
+    logger.info("Data directory: %s (exists=%s)", data_dir, Path(data_dir).exists())
+    logger.info("Vector directory: %s (exists=%s)", vector_dir, Path(vector_dir).exists())
+    logger.info("Vector store config path: %s", Path(vector_dir) / "store_config.json")
 
 
 def parse_args() -> argparse.Namespace:
@@ -46,7 +78,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--top-k",
         type=int,
-        default=8,
+        default=15,
         help="Number of chunks to fetch per query during retrieval",
     )
     parser.add_argument(
@@ -65,13 +97,21 @@ def parse_args() -> argparse.Namespace:
 async def run_pipeline(args: argparse.Namespace):
     load_dotenv()
     _ensure_gemini_key()
+    _log_runtime_context(args.data_dir, args.vector_dir)
 
     vector_dir = args.vector_dir
-    if args.rebuild_store or not vector_store_exists(vector_dir):
+    vector_exists = vector_store_exists(vector_dir)
+    logger.info("Vector store present=%s (rebuild=%s)", vector_exists, args.rebuild_store)
+    if args.rebuild_store or not vector_exists:
+        logger.info("Starting ingestion into %s", vector_dir)
         ingest_documents(data_dir=args.data_dir, persist_dir=vector_dir)
+        logger.info("Finished ingestion into %s", vector_dir)
 
     documents = PDFParser.load_structured_pdfs(args.data_dir)
     grouped_docs = group_documents_by_source(documents)
+    logger.info("Parsed %s documents -> %s grouped sources", len(documents), len(grouped_docs))
+    for doc in grouped_docs:
+        logger.info("Document ready: source=%s, heading_count=%s, text_chars=%s", doc.source, len(doc.headings), len(doc.text))
     if not grouped_docs:
         raise ValueError("No parsed documents were found for agent processing")
 
@@ -91,8 +131,14 @@ async def run_pipeline(args: argparse.Namespace):
 
     server_script = args.server_script
     server_env = {"VECTOR_STORE_DIR": str(Path(vector_dir).resolve())}
+    logger.info("Starting MCP server script=%s with env=%s", server_script, server_env)
 
     async with MCPToolClient(server_script=server_script, env=server_env) as mcp_client:
+        try:
+            tools = await mcp_client.list_tools()
+            logger.info("MCP tools available: %s", ", ".join(tools))
+        except Exception as exc:  # noqa: BLE001 - diagnostics path
+            logger.error("Failed to list MCP tools: %s", exc)
         runner = AgenticGraphRunner(
             query_model=query_model,
             requirements_model=requirements_model,
