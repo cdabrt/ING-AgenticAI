@@ -1,5 +1,3 @@
-version: "3.8"
-
 services:
   frontend:
     build:
@@ -7,7 +5,7 @@ services:
       dockerfile: Dockerfile
     ports:
       - "3000:3000"
-    container_name: frontend-app
+    container_name: frontend
 
   backend:
     build:
@@ -15,6 +13,6 @@ services:
       dockerfile: Dockerfile
     ports:
       - "8000:8000"
-    container_name: backend-app
+    container_name: backend
     depends_on:
       - frontend
