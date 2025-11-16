@@ -361,6 +361,8 @@ class AgenticGraphRunner:
                     " Use the retrieved document chunks (and any enriched web context) to translate legal obligations into actionable business and data requirements."
                     " Address governance, risk management, assurance, reporting formats, and data collection duties relevant to lending, investment, and underwriting activities."
                     " Cite chunk IDs/pages for every document-driven statement and include online citations whenever external context informed the requirement."
+                    " Format every entry in `document_sources` exactly as `{source}, page {page_number}, chunk {chunk_id}` using the values from the provided retrieval chunks."
+                    " If a page number is missing, write `page unknown` but always keep the chunk identifier in the same format."
                     " Respond strictly with the JSON schema described in the instructions so downstream systems can ingest your output.",
                 ),
                 (

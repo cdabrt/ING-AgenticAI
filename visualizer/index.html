@@ -201,7 +201,8 @@
     </main>
 
     <script>
-      const DATA_URL = "../artifacts/requirements.json";
+      const DATA_URL = new URL("../artifacts/requirements.json", document.baseURI).href;
+      const DATA_PDF_ROOT = new URL("../data/", document.baseURI);
       const docSelect = document.getElementById("docSelect");
       const refreshBtn = document.getElementById("refreshBtn");
       const errorBanner = document.getElementById("error");
@@ -378,7 +379,8 @@
             .split("/")
             .map((segment) => encodeURIComponent(segment))
             .join("/");
-          let href = `../data/${encoded}`;
+          const base = new URL(DATA_PDF_ROOT.href);
+          let href = new URL(encoded, base).href;
           if (pageMatch) {
             href += `#page=${pageMatch[1]}`;
           }
