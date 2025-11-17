@@ -22,3 +22,5 @@ artifacts/
 
 # Misc
 logs/
+
+node_modules/
