@@ -14,7 +14,6 @@ import RequirementListSkeleton from "@/components/custom/RequirementListSkeleton
 import RequirementList from "@/components/custom/RequirementList";
 import RequirementBundleList from "@/components/custom/RequirementBundleList";
 import BundleDetailView from "@/components/custom/BundleDetailView";
-import { Separator } from "@radix-ui/react-separator";
 
 const buttons = ["Business Requirements", "Data Requirements"];
 
