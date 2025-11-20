@@ -35,6 +35,11 @@ interface RequirementBundleListProps {
 
 export const columns: ColumnDef<RequirementBundle>[] = [
     {
+        accessorKey: "id",
+        header: "Id",
+        cell: ({ row }) => <div className="font-medium">{row.getValue("id")}</div>,
+    },
+    {
         accessorKey: "document",
         header: ({ column }) => {
             return (
@@ -88,8 +93,8 @@ export default function RequirementBundleList({ data, onRowClick }: RequirementB
     const [sorting, setSorting] = React.useState<SortingState>([])
     const [columnFilters, setColumnFilters] = React.useState<ColumnFiltersState>([])
     const [columnVisibility, setColumnVisibility] = React.useState<VisibilityState>({})
-    const [selectedRowId, setSelectedRowId] = React.useState<string | null>(
-        data.length > 0 ? data[0].document : null
+    const [selectedRowId, setSelectedRowId] = React.useState<number | null>(
+        data.length > 0 ? data[0].id : null
     )
 
     const table = useReactTable({
@@ -137,10 +142,10 @@ export default function RequirementBundleList({ data, onRowClick }: RequirementB
                                 <TableRow
                                     key={row.id}
                                     onClick={() => {
-                                        setSelectedRowId(row.original.document)
+                                        setSelectedRowId(row.original.id)
                                         onRowClick?.(row.original)
                                     }}
-                                    className={`cursor-pointer ${selectedRowId === row.original.document
+                                    className={`cursor-pointer ${selectedRowId === row.original.id
                                         ? "bg-zinc-200 hover:bg-zinc-300"
                                         : ""
                                         }`}

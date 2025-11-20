@@ -7,6 +7,7 @@ export interface RequirementItem {
 }
 
 export interface RequirementBundle {
+    id: number;
     document: string;
     document_type: string;
     business_requirements: RequirementItem[];
