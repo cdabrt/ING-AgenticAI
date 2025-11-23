@@ -116,17 +116,17 @@ export default function Home() {
     return [];
   }
 
-  function getRequirementBundle(): Promise<void> {
+  function getRequirementBundles(): Promise<void> {
     setError(null);
-    return axios.post('/api/pipeline').catch((error) => {
+    return axios.get('/api/bundles').catch((error) => {
       setError(error.message);
     }).then((response) => {
       if (response && response.data) {
-        let maxid = results.length > 0 ? Math.max(...results.map(b => b.id)) : 0;
-        response.data.id = maxid + 1;
-
-        setResults([...results, response.data]);
-        setSelectedBundle(response.data);
+        const bundles = Array.isArray(response.data) ? response.data : [response.data];
+        setResults(bundles);
+        if (bundles.length > 0) {
+          setSelectedBundle(bundles[0]);
+        }
         setSelectedList(0);
       } else {
         setResults([]);
@@ -135,9 +135,18 @@ export default function Home() {
     });
   }
 
+  function generateRequirementBundle(): Promise<void> {
+    setError(null);
+    return axios.post('/api/pipeline').catch((error) => {
+      setError(error.message);
+    }).then(async () => {
+      await getRequirementBundles();
+    });
+  }
+
   useEffect(() => {
     // Initial load can be handled here if needed
-    getRequirementBundle();
+    getRequirementBundles();
   }, []);
 
   return (
@@ -186,16 +195,18 @@ export default function Home() {
                 </Button>
                 <ButtonGroupSeparator orientation="vertical" />
                 <Button
-                  onClick={() => getRequirementBundle()}
+                  onClick={async () => {
+                    await generateRequirementBundle();
+                  }}
                 >
-                  Download
+                  Generate
                 </Button>
               </ButtonGroup>
             </div>
             {/* Main Content */}
             <div className="flex-1 w-full bg-white p-4 relative flex flex-col">
               <div className="flex-grow overflow-y-auto">
-                {!results && <RequirementListSkeleton loading={loading} setLoading={setLoading} getRequirementBundle={getRequirementBundle} />}
+                {!results && <RequirementListSkeleton loading={loading} setLoading={setLoading} getRequirementBundle={getRequirementBundles} />}
                 {selectedList > 0 &&
                   <div className="flex flex-col space-y-4">
                     <h2 className="text-black">

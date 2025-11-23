@@ -1,30 +1,32 @@
 from typing import List
-from fastapi import FastAPI
-from pydantic import BaseModel
+from contextlib import asynccontextmanager
+from fastapi import Depends, FastAPI
+from AgenticAI.agentic.models import RequirementBundle, RequirementItem
 
-app = FastAPI()
+from database.bundle_provider import BundleProvider
+from contracts.models import Base
+from database.engine.psycopg_connection import create_engine
 
-class RequirementItem(BaseModel):
-    id: str
-    description: str
-    rationale: str
-    document_sources: List[str]
-    online_sources: List[str]
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup: Initialize database tables
+    engine = create_engine()
+    # Drop and recreate tables to ensure schema is up to date
+    Base.metadata.drop_all(bind=engine)
+    Base.metadata.create_all(bind=engine)
+    print("Database tables initialized!")
+    yield
+    # Shutdown: cleanup if needed
+    print("Shutting down...")
 
-
-class RequirementBundle(BaseModel):
-    document: str
-    document_type: str
-    business_requirements: List[RequirementItem]
-    data_requirements: List[RequirementItem]
-    assumptions: List[str]
+app = FastAPI(lifespan=lifespan)
 
 @app.get("/")
 def read_root():
     return {"Hello": "World"}
 
 @app.post("/api/pipeline")
-def run_pipeline() -> RequirementBundle:
+def run_pipeline(client: BundleProvider = Depends(BundleProvider)) -> RequirementBundle:
     req1 = RequirementItem(
         id="REQ-001",
         description="The system shall encrypt all user data at rest using AES-256 encryption.",
@@ -60,4 +62,11 @@ def run_pipeline() -> RequirementBundle:
         ]
     )
 
-    return bundle
+    saved_bundle = client.save_requirement_bundle(bundle)
+    return saved_bundle
+
+@app.get("/api/bundles")
+def get_all_requirement_bundles(client: BundleProvider = Depends(BundleProvider)) -> List[RequirementBundle]:
+
+    bundles = client.get_requirement_bundles()
+    return bundles
