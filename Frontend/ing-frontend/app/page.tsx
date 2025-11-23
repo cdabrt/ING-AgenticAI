@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import dynamic from "next/dynamic";
 import { Button } from "@/components/ui/button";
 import { RequirementBundle, RequirementItem } from "@/lib/types";
 import { AlertCircleIcon, Search } from "lucide-react";
@@ -14,6 +15,13 @@ import RequirementListSkeleton from "@/components/custom/RequirementListSkeleton
 import RequirementList from "@/components/custom/RequirementList";
 import RequirementBundleList from "@/components/custom/RequirementBundleList";
 import BundleDetailView from "@/components/custom/BundleDetailView";
+import FileUploadDialog from "@/components/custom/FileUploadDialog";
+
+// Import PDFViewer dynamically to avoid SSR issues
+const PDFViewer = dynamic(() => import("@/components/custom/PDFViewer").then(mod => ({ default: mod.PDFViewer })), {
+  ssr: false,
+  loading: () => <div className="flex items-center justify-center p-8"><p className="text-sm text-gray-500">Loading PDF viewer...</p></div>
+});
 
 const buttons = ["Business Requirements", "Data Requirements"];
 
@@ -106,6 +114,9 @@ export default function Home() {
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showUploadDialog, setShowUploadDialog] = useState(false);
+  const [pdfData, setPdfData] = useState<string | null>(null);
+  const [showPdfViewer, setShowPdfViewer] = useState(false);
 
   function getRequirementList(): RequirementItem[] {
     if (selectedList == 1) {
@@ -142,6 +153,27 @@ export default function Home() {
     }).then(async () => {
       await getRequirementBundles();
     });
+  }
+
+  async function openPdf(pdfId: number): Promise<void> {
+    setError(null);
+    try {
+      const response = await axios.get(`/api/pdfs/${pdfId}/download`, {
+        responseType: 'arraybuffer'
+      });
+
+      // // Convert ArrayBuffer to base64
+      // const base64 = btoa(
+      //   new Uint8Array(response.data)
+      //     .reduce((data, byte) => data + String.fromCharCode(byte), '')
+      // );
+
+      // const dataUrl = `data:application/pdf;base64,${base64}`;
+      setPdfData(response.data);
+      setShowPdfViewer(true);
+    } catch (error: any) {
+      setError(error.message || "Failed to load PDF");
+    }
   }
 
   useEffect(() => {
@@ -202,6 +234,22 @@ export default function Home() {
                   Generate
                 </Button>
               </ButtonGroup>
+              <ButtonGroup>
+                <Button
+                  onClick={() => setShowUploadDialog(!showUploadDialog)}
+                  variant={showUploadDialog ? "default" : "outline"}
+                >
+                  Upload Files
+                </Button>
+              </ButtonGroup>
+              <ButtonGroup>
+                <Button
+                  onClick={() => openPdf(1)}
+                  variant="outline"
+                >
+                  Open PDF
+                </Button>
+              </ButtonGroup>
             </div>
             {/* Main Content */}
             <div className="flex-1 w-full bg-white p-4 relative flex flex-col">
@@ -245,6 +293,48 @@ export default function Home() {
             </Alert>
           </div>
         </div>
+      }
+      {
+        showUploadDialog && (
+          <>
+            <div className="absolute w-full h-full bg-black opacity-50 z-1000">
+            </div>
+            <div className="absolute w-full h-full top-0 left-0 flex justify-center items-center pointer-events-auto z-1001">
+              <div className="w-max-80">
+                <FileUploadDialog
+                  onUploadComplete={async () => {
+                    await getRequirementBundles();
+                    setShowUploadDialog(false);
+                  }}
+                  onClose={() => setShowUploadDialog(false)}
+                />
+              </div>
+            </div>
+          </>
+        )
+      }
+      {
+        showPdfViewer && pdfData && (
+          <>
+            <div className="absolute w-full h-full bg-black opacity-50 z-1000" onClick={() => setShowPdfViewer(false)}>
+            </div>
+            <div className="absolute w-full h-full top-0 left-0 flex justify-center items-center pointer-events-none z-1001">
+              <div className="w-4/5 h-4/5 pointer-events-auto bg-white rounded-lg shadow-lg overflow-hidden">
+                <div className="h-full flex flex-col">
+                  <div className="flex justify-between items-center p-4 border-b">
+                    <h2 className="text-lg font-bold">PDF Viewer</h2>
+                    <Button onClick={() => setShowPdfViewer(false)} variant="outline">
+                      Close
+                    </Button>
+                  </div>
+                  <div className="flex-1 overflow-auto">
+                    <PDFViewer file={pdfData} />
+                  </div>
+                </div>
+              </div>
+            </div>
+          </>
+        )
       }
     </div>
   );
