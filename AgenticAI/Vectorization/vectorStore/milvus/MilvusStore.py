@@ -104,24 +104,11 @@ class MilvusStore(IVectorStore):
         chunks = self._rerank(query, chunks)
         return chunks[:top_k]
 
-    @override
-    def top_k_sparse_search(self, query: str, top_k=20) -> list[StoredChunk]:
-        query_sparse_embedding, _ = self._query_embedding(query)
+    def _top_k_search(self, query: str, field: str, top_k=20) -> list[StoredChunk]:
+        query_sparse_embedding, query_dense_embedding = self._query_embedding(query)
         result = self.collection.search(
-            [query_sparse_embedding],
-            anns_field="sparse_vector",
-            limit=top_k * 5,
-            output_fields=self._output_fields(),
-            param=self._search_params(),
-        )[0]
-        return self._post_search(query, result, top_k)
-
-    @override
-    def top_k_dense_search(self, query, top_k=20) -> list[StoredChunk]:
-        _, query_dense_embedding = self._query_embedding(query)
-        result = self.collection.search(
-            [query_dense_embedding],
-            anns_field="dense_vector",
+            [query_sparse_embedding if field == 'sparse_vector' else query_dense_embedding],
+            anns_field=field,
             limit=2 * top_k,
             output_fields=self._output_fields(),
             param=self._search_params(),
@@ -129,8 +116,33 @@ class MilvusStore(IVectorStore):
         return self._post_search(query, result, top_k)
 
     @override
-    def top_k_hybrid_search(self, query, top_k=20, sparse_weight=0.7) -> list[
-        StoredChunk]:
+    def top_k_sparse_search(self, query: str, top_k=20) -> list[StoredChunk]:
+        # query_sparse_embedding, _ = self._query_embedding(query)
+        # result = self.collection.search(
+        #     [query_sparse_embedding],
+        #     anns_field="sparse_vector",
+        #     limit=2 * top_k,
+        #     output_fields=self._output_fields(),
+        #     param=self._search_params(),
+        # )[0]
+        # return self._post_search(query, result, top_k)
+        return self._top_k_search(query, 'sparse_vector', top_k)
+
+    @override
+    def top_k_dense_search(self, query, top_k=20) -> list[StoredChunk]:
+        # _, query_dense_embedding = self._query_embedding(query)
+        # result = self.collection.search(
+        #     [query_dense_embedding],
+        #     anns_field="dense_vector",
+        #     limit=2 * top_k,
+        #     output_fields=self._output_fields(),
+        #     param=self._search_params(),
+        # )[0]
+        # return self._post_search(query, result, top_k)
+        return self._top_k_search(query, 'dense_vector', top_k)
+
+    @override
+    def top_k_hybrid_search(self, query, top_k=20, sparse_weight=0.7) -> list[StoredChunk]:
         query_sparse_embedding, query_dense_embedding = self._query_embedding(query)
         dense_req = AnnSearchRequest(
             [query_dense_embedding],
@@ -173,3 +185,94 @@ class MilvusStore(IVectorStore):
                 docs_embeddings["dense"],
             ]
             self.collection.insert(batched_entities)
+
+    def _search(self, embedding, query: str, field: str, page_number=0, length=10) -> list[StoredChunk]:
+        '''
+
+        :param query:
+        :param page_number: starts from 0
+        :param length:
+        :return:
+        '''
+        result = self.collection.search(
+            [embedding],
+            anns_field=field,
+            limit=length,
+            output_fields=self._output_fields(),
+            param={
+                **self._search_params(),
+                "offset": page_number * length
+            }
+        )[0]
+        return self._post_search(query, result, length)
+
+    def _sparse_search(self, query_sparse_embedding, query: str, page_number=0, length=10) -> list[StoredChunk]:
+        return self._search(query_sparse_embedding, query, 'sparse_vector', page_number, length)
+
+    def _continue_search(self, query: str, category: str, rerank_score=0.35, reranker=None) -> list[StoredChunk]:
+        page_number = 0
+        result = []
+        query_sparse_embedding, query_dense_embedding = self._query_embedding(query)
+        while True:
+            if category == 'sparse':
+                page_result = self._sparse_search(query_sparse_embedding, query, page_number)
+            elif category == 'dense':
+                page_result = self._dense_search(query_dense_embedding, query, page_number)
+            elif category == 'hybrid':
+                page_result = self._hybrid_search(query_sparse_embedding, query_dense_embedding, reranker, query,
+                                                  page_number)
+            else:
+                raise RuntimeError('invalid category')
+
+            if page_result[-1].score >= rerank_score:
+                result += page_result
+                continue
+            else:
+                for index, record in enumerate(page_result):
+                    if record.score < rerank_score:
+                        result += page_result[:index]
+                        break
+                break
+        return sorted(result, key=lambda x: x.score, reverse=True)
+
+    @override
+    def sparse_search(self, query: str, rerank_score=0.35) -> list[StoredChunk]:
+        return self._continue_search(query, 'sparse', rerank_score)
+
+    def _dense_search(self, query_dense_embedding, query: str, page_number=0, length=10):
+        return self._search(query_dense_embedding, query, 'dense_vector', page_number, length)
+
+    @override
+    def dense_search(self, query: str, rerank_score=0.35) -> list[StoredChunk]:
+        return self._continue_search(query, 'dense', rerank_score)
+
+    def _hybrid_search(self, sparse_embedding, dense_embedding, reranker, query: str, page_number=0, length=10) -> list[
+        StoredChunk]:
+        dense_req = AnnSearchRequest(
+            [sparse_embedding],
+            "dense_vector",
+            self._search_params(),
+            limit=length
+        )
+        sparse_req = AnnSearchRequest(
+            [dense_embedding],
+            "sparse_vector",
+            self._search_params(),
+            limit=length
+        )
+        result = self.collection.hybrid_search(
+            [sparse_req, dense_req],
+            rerank=reranker,
+            limit=length,
+            output_fields=self._output_fields(),
+            param={
+                **self._search_params(),
+                "offset": page_number * length
+            }
+        )[0]
+        return self._post_search(query, result, length)
+
+    @override
+    def hybrid_search(self, query: str, sparse_weight=0.5, rerank_score=0.35) -> list[StoredChunk]:
+        reranker = WeightedRanker(sparse_weight, 1 - sparse_weight)
+        return self._continue_search(query, 'hybrid', rerank_score, reranker)
