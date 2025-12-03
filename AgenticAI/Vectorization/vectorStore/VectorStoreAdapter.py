@@ -33,6 +33,18 @@ class IVectorStore(ABC):
         pass
 
     @abstractmethod
+    def sparse_search(self, query: str, rerank_score=0.35) -> list[StoredChunk]:
+        pass
+
+    @abstractmethod
+    def dense_search(self, query: str, rerank_score=0.35) -> list[StoredChunk]:
+        pass
+
+    @abstractmethod
+    def hybrid_search(self, query: str, sparse_weight=0.5, rerank_score=0.35) -> list[StoredChunk]:
+        pass
+
+    @abstractmethod
     def store_to_db(self, chunks: list[StoredChunk], batch_size=50) -> None:
         '''
 
