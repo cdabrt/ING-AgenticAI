@@ -226,13 +226,13 @@ class MilvusStore(IVectorStore):
 
             if page_result[-1].score >= rerank_score:
                 result += page_result
-                continue
             else:
                 for index, record in enumerate(page_result):
                     if record.score < rerank_score:
                         result += page_result[:index]
                         break
                 break
+            page_number += 1
         return sorted(result, key=lambda x: x.score, reverse=True)
 
     @override
@@ -249,13 +249,13 @@ class MilvusStore(IVectorStore):
     def _hybrid_search(self, sparse_embedding, dense_embedding, reranker, query: str, page_number=0, length=10) -> list[
         StoredChunk]:
         dense_req = AnnSearchRequest(
-            [sparse_embedding],
+            [dense_embedding],
             "dense_vector",
             self._search_params(),
             limit=length
         )
         sparse_req = AnnSearchRequest(
-            [dense_embedding],
+            [sparse_embedding],
             "sparse_vector",
             self._search_params(),
             limit=length
@@ -265,10 +265,7 @@ class MilvusStore(IVectorStore):
             rerank=reranker,
             limit=length,
             output_fields=self._output_fields(),
-            param={
-                **self._search_params(),
-                "offset": page_number * length
-            }
+            offset=page_number * length,
         )[0]
         return self._post_search(query, result, length)
 
