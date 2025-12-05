@@ -18,7 +18,7 @@ LLM adapter: Should have adapter for different APIs
 
 Validation UI: Analyst reviews answers
 
-# HOTO
+# HOWTO
 
 1. create `.env` in root folder with correct variables
 2.
