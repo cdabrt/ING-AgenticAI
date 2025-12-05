@@ -18,3 +18,7 @@ LLM adapter: Should have adapter for different APIs
 
 Validation UI: Analyst reviews answers
 
+```shell
+# !!! dependencies should have, because pc is hard to run so i didnt try
+pip install --upgrade pymilvus "pymilvus[model]"
+```
