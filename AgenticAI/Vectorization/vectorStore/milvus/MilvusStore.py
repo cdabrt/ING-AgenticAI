@@ -263,11 +263,11 @@ class MilvusStore(IVectorStore):
         result = self.collection.hybrid_search(
             [sparse_req, dense_req],
             rerank=reranker,
-            limit=length,
+            limit=length * 2,
             output_fields=self._output_fields(),
-            offset=page_number * length,
+            offset=page_number * length * 2,
         )[0]
-        return self._post_search(query, result, length)
+        return self._post_search(query, result, length * 2)
 
     @override
     def hybrid_search(self, query: str, sparse_weight=0.5, rerank_score=0.35) -> list[StoredChunk]:
