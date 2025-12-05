@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any, Dict, List, Tuple, TypedDict, cast
 
+from langchain_core.exceptions import OutputParserException
 from langchain_core.output_parsers import PydanticOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_google_genai import ChatGoogleGenerativeAI
@@ -319,16 +320,46 @@ class AgenticGraphRunner:
             ]
         )
         chain = prompt | self.query_model | parser
-        response: WebSelectionResponse = await chain.ainvoke(
-            {
-                "summary": document_summary,
-                "doc_type": document_type,
-                "query": query,
-                "candidates": json.dumps([cand.model_dump() for cand in candidates]),
-                "format_instructions": format_instructions,
-            }
-        )
-        return response.selections
+        summary_snippet = (document_summary or "")[:80]
+        try:
+            response: WebSelectionResponse = await chain.ainvoke(
+                {
+                    "summary": document_summary,
+                    "doc_type": document_type,
+                    "query": query,
+                    "candidates": json.dumps([cand.model_dump() for cand in candidates]),
+                    "format_instructions": format_instructions,
+                }
+            )
+            return response.selections or []
+        except OutputParserException as exc:
+            await self._log_event(
+                "web_candidate_screen_error",
+                {
+                    "doc_source": summary_snippet,
+                    "query": query,
+                    "error": str(exc),
+                },
+            )
+        except Exception as exc:  # noqa: BLE001 - keep pipeline resilient
+            await self._log_event(
+                "web_candidate_screen_error",
+                {
+                    "doc_source": summary_snippet,
+                    "query": query,
+                    "error": f"Unexpected failure: {exc}",
+                },
+            )
+
+        # Default to rejecting all candidates when parsing fails to avoid pipeline crashes.
+        return [
+            WebSourceSelection(
+                identifier=candidate.identifier,
+                fetch=False,
+                rationale="Skipped: unable to parse selection response",
+            )
+            for candidate in candidates
+        ]
 
     async def _evaluate_web_content(
         self,

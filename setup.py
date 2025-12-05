@@ -21,5 +21,6 @@ setup(
         "python-dotenv",
         "httpx",
         "beautifulsoup4",
+        "fpdf2",
     ],
 )

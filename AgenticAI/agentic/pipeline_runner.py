@@ -17,6 +17,7 @@ from AgenticAI.PDF.PDFParser import PDFParser
 from AgenticAI.agentic.decision_logger import DecisionLogger
 from AgenticAI.agentic.documents import group_documents_by_source
 from AgenticAI.agentic.langgraph_runner import AgenticGraphRunner, AgenticState
+from AgenticAI.agentic.pdf_report import render_requirements_pdf
 from AgenticAI.mcp.client import MCPToolClient
 from AgenticAI.pipeline.ingestion import ingest_documents, vector_store_exists
 
@@ -85,6 +86,11 @@ def parse_args() -> argparse.Namespace:
         "--output",
         default="artifacts/requirements.json",
         help="Path where the consolidated requirements JSON will be saved",
+    )
+    parser.add_argument(
+        "--pdf-output",
+        default="artifacts/requirements.pdf",
+        help="Path where the readable PDF export will be saved",
     )
     parser.add_argument(
         "--decision-log",
@@ -194,6 +200,12 @@ async def run_pipeline(args: argparse.Namespace):
         json.dump(output_records, handle, indent=2)
 
     logger.info("Wrote %s requirement bundles to %s", len(output_records), output_path)
+
+    try:
+        pdf_path = render_requirements_pdf(output_records, args.pdf_output)
+        logger.info("Rendered PDF summary to %s", pdf_path)
+    except Exception:  # noqa: BLE001 - diagnostics for PDF failures
+        logger.exception("Failed to render PDF summary")
 
 
 def main():

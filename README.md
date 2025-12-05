@@ -8,7 +8,7 @@ The project now delivers an end-to-end agentic RAG workflow tailored for regulat
 - **MCP tooling** – `AgenticAI/mcp_servers/regulation_server.py` exposes three FastMCP tools: `retrieve_chunks` (FAISS semantic search), `web_search` (DuckDuckGo metadata feed), and `fetch_web_page` (sanitized HTML fetch capped at 4k characters). They are consumed exclusively through `AgenticAI.mcp.client.MCPToolClient`, so every retrieval or open-web lookup stays behind the MCP boundary.
 - **LangGraph agents** – `AgenticAI.agentic.langgraph_runner.AgenticGraphRunner` wires a LangGraph (`query_agent → retrieval → context → requirements → END`) across two Gemini models (Flash + Pro) plus helper chains that vet web candidates before fetching.
 - **Decision logging** – `AgenticAI.agentic.decision_logger.DecisionLogger` streams every step (queries, retrieval hits, screening decisions, requirement counts) to `artifacts/agent_decisions.jsonl` for auditability.
-- **Orchestration** – `AgenticAI.agentic.pipeline_runner` handles ingestion checks, starts the MCP server, runs per-document LangGraph passes, aggregates summaries/chunks, and writes the consolidated requirements bundle to `artifacts/requirements.json`.
+- **Orchestration** – `AgenticAI.agentic.pipeline_runner` handles ingestion checks, starts the MCP server, runs per-document LangGraph passes, aggregates summaries/chunks, and writes the consolidated requirements bundle to `artifacts/requirements.json` plus a business-friendly PDF at `artifacts/requirements.pdf` by default.
 
 ### Agent orchestration in detail
 
@@ -49,7 +49,7 @@ Every approval/rejection is appended to `artifacts/agent_decisions.jsonl`, makin
 
 - `pipeline_runner` loads parsed PDFs via `PDFParser`, groups them per source (`documents.group_documents_by_source`), and for each group constructs the initial state `{doc_source, doc_text, doc_headings}`.
 - `runner.process_document` executes the first three nodes (query, retrieval, context). This ensures each document produces its own summary, document type, chunk list, and optional web context.
-- After all documents finish, `pipeline_runner` combines their summaries/types/chunks into a single aggregate state and calls `runner.generate_requirements`, which executes only `_requirements_node`. The result is one consolidated `RequirementBundle` persisted to `artifacts/requirements.json`.
+- After all documents finish, `pipeline_runner` combines their summaries/types/chunks into a single aggregate state and calls `runner.generate_requirements`, which executes only `_requirements_node`. The result is one consolidated `RequirementBundle` persisted to `artifacts/requirements.json` and rendered into a PDF summary.
 
 ### Tool visibility and permissions
 
@@ -102,9 +102,9 @@ Inspect `artifacts/agent_decisions.jsonl` to replay the agent’s reasoning or f
 	- rebuild the FAISS store (unless it already exists and `--rebuild-store` is omitted),
 	- start the MCP regulation server automatically,
 	- execute the LangGraph pipeline per document,
-	- persist the JSON requirements bundle to `artifacts/requirements.json`.
+	- persist the JSON requirements bundle to `artifacts/requirements.json` and a formatted PDF to `artifacts/requirements.pdf` (configurable via `--pdf-output`).
 
-4. **Inspect results** – open `artifacts/requirements.json` to review generated business & data requirements alongside citations to both document chunks and optional online sources.
+4. **Inspect results** – open `artifacts/requirements.json` (machine readable) or the auto-generated `artifacts/requirements.pdf` (business friendly) to review generated business & data requirements alongside citations to both document chunks and optional online sources.
 
 ## Visualizing the JSON output
 
@@ -124,6 +124,7 @@ For a friendlier view of the generated requirements, a static viewer lives under
 - `--top-k` – number of FAISS chunks fetched per query (default 15).
 - `--server-script` – run a custom MCP server implementation if needed.
 - `--output` – change the output JSON path.
+- `--pdf-output` – change where the PDF rendering is stored (default `artifacts/requirements.pdf`).
 
 ## Project layout
 
