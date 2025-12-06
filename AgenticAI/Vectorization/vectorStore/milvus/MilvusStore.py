@@ -117,28 +117,10 @@ class MilvusStore(IVectorStore):
 
     @override
     def top_k_sparse_search(self, query: str, top_k=20) -> list[StoredChunk]:
-        # query_sparse_embedding, _ = self._query_embedding(query)
-        # result = self.collection.search(
-        #     [query_sparse_embedding],
-        #     anns_field="sparse_vector",
-        #     limit=2 * top_k,
-        #     output_fields=self._output_fields(),
-        #     param=self._search_params(),
-        # )[0]
-        # return self._post_search(query, result, top_k)
         return self._top_k_search(query, 'sparse_vector', top_k)
 
     @override
     def top_k_dense_search(self, query, top_k=20) -> list[StoredChunk]:
-        # _, query_dense_embedding = self._query_embedding(query)
-        # result = self.collection.search(
-        #     [query_dense_embedding],
-        #     anns_field="dense_vector",
-        #     limit=2 * top_k,
-        #     output_fields=self._output_fields(),
-        #     param=self._search_params(),
-        # )[0]
-        # return self._post_search(query, result, top_k)
         return self._top_k_search(query, 'dense_vector', top_k)
 
     @override
@@ -214,15 +196,16 @@ class MilvusStore(IVectorStore):
         result = []
         query_sparse_embedding, query_dense_embedding = self._query_embedding(query)
         while True:
-            if category == 'sparse':
-                page_result = self._sparse_search(query_sparse_embedding, query, page_number)
-            elif category == 'dense':
-                page_result = self._dense_search(query_dense_embedding, query, page_number)
-            elif category == 'hybrid':
-                page_result = self._hybrid_search(query_sparse_embedding, query_dense_embedding, reranker, query,
-                                                  page_number)
-            else:
-                raise RuntimeError('invalid category')
+            match category:
+                case 'sparse':
+                    page_result = self._sparse_search(query_sparse_embedding, query, page_number)
+                case 'dense':
+                    page_result = self._dense_search(query_dense_embedding, query, page_number)
+                case 'hybrid':
+                    page_result = self._hybrid_search(query_sparse_embedding, query_dense_embedding, reranker, query,
+                                                      page_number)
+                case _:
+                    raise RuntimeError('invalid category')
 
             if page_result[-1].score >= rerank_score:
                 result += page_result
