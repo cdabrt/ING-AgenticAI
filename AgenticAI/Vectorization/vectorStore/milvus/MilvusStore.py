@@ -251,21 +251,26 @@ class MilvusStore(IVectorStore):
         dense_req = AnnSearchRequest(
             [dense_embedding],
             "dense_vector",
-            self._search_params(),
-            limit=length
+            limit=length,
+            param={
+                **self._search_params(),
+                "offset": page_number * length
+            }
         )
         sparse_req = AnnSearchRequest(
             [sparse_embedding],
             "sparse_vector",
-            self._search_params(),
-            limit=length
+            limit=length,
+            param={
+                **self._search_params(),
+                "offset": page_number * length
+            }
         )
         result = self.collection.hybrid_search(
             [sparse_req, dense_req],
             rerank=reranker,
             limit=length * 2,
-            output_fields=self._output_fields(),
-            offset=page_number * length * 2,
+            output_fields=self._output_fields()
         )[0]
         return self._post_search(query, result, length * 2)
 
