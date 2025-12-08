@@ -156,6 +156,9 @@ class AgenticGraphRunner:
         return [best_by_location[key] for key in order]
 
     async def _context_node(self, state: AgenticState) -> AgenticState:
+        retrieval_chunks = state.get("retrieval_results", [])
+        # Pass a trimmed JSON payload so the assessor can inspect actual snippets without blowing up the prompt.
+        chunk_preview = json.dumps(retrieval_chunks[:20]) if retrieval_chunks else "[]"
         parser = PydanticOutputParser(pydantic_object=ContextAssessment)
         format_instructions = parser.get_format_instructions()
         prompt = ChatPromptTemplate.from_messages(
@@ -164,13 +167,14 @@ class AgenticGraphRunner:
                     "system",
                     "You are the context assessor for Agent 1. Evaluate whether the retrieved chunks alone let a bank draft precise requirements."
                     " When gaps remain (e.g., unclear thresholds, missing ESRS references, external timelines), recommend up to three follow-up open-web queries."
+                    " You will receive the actual retrieved chunks (JSON objects with source/page/chunk_id/text) so ground your judgment in what is already available, and ask for more meaningful context if needed."
                     " Remember you can call the MCP tools `web_search` (metadata only) and `fetch_web_page`"
                     " (for shortlisted URLs) so phrase queries that surface high-signal regulatory explainers."
                     " Respond strictly with the JSON schema described in the instructions and justify why more context is or is not needed.",
                 ),
                 (
                     "human",
-                    "Document summary: {summary}\nDocument type: {doc_type}\nRetrieved context count: {ctx_count}\n"
+                    "Document summary: {summary}\nDocument type: {doc_type}\nRetrieved context count: {ctx_count}\nRetrieved context (JSON list): {chunks}\n"
                     "{format_instructions}",
                 ),
             ]
@@ -181,6 +185,7 @@ class AgenticGraphRunner:
                 "summary": state.get("document_summary", ""),
                 "doc_type": state.get("document_type", "unknown"),
                 "ctx_count": len(state.get("retrieval_results", [])),
+                "chunks": chunk_preview,
                 "format_instructions": format_instructions,
             }
         )
