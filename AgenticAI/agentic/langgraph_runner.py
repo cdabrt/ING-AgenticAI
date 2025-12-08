@@ -58,12 +58,14 @@ class AgenticGraphRunner:
         workflow.add_node("retrieval", self._retrieval_node)
         workflow.add_node("context", self._context_node)
         workflow.add_node("requirements", self._requirements_node)
+        workflow.add_node("requirements_refinement", self._requirements_refinement_node)
 
         workflow.set_entry_point("query_agent")
         workflow.add_edge("query_agent", "retrieval")
         workflow.add_edge("retrieval", "context")
         workflow.add_edge("context", "requirements")
-        workflow.add_edge("requirements", END)
+        workflow.add_edge("requirements", "requirements_refinement")
+        workflow.add_edge("requirements_refinement", END)
 
         return workflow.compile()
 
@@ -450,6 +452,66 @@ class AgenticGraphRunner:
             },
         )
         return {"requirements": bundle.model_dump()}
+
+    async def _requirements_refinement_node(self, state: AgenticState) -> AgenticState:
+        existing_requirements = state.get("requirements")
+        if not existing_requirements:
+            return {}
+
+        prior_bundle = RequirementBundle.model_validate(existing_requirements)
+        parser = PydanticOutputParser(pydantic_object=RequirementBundle)
+        format_instructions = parser.get_format_instructions()
+        prompt = ChatPromptTemplate.from_messages(
+            [
+                (
+                    "system",
+                    "You are Agent 2R, a self-reviewing regulatory implementation architect."
+                    " Re-read the previously generated requirements bundle and tighten it."
+                    " Revise existing entries by updating their description, rationale, or sources as needed,"
+                    " keeping the original `id` whenever you edit an item."
+                    " Add new business or data requirements whenever the document or web context mandates coverage that is missing."
+                    " Elevate actionability: spell out concrete owner actions, controls, data flows, and timing so a reporting team can operationalize the requirement in the bank's yearly report."
+                    " Strengthen coherence by explaining how requirements interact or build on one another, flagging dependencies or sequencing when relevant."
+                    " Use richer detail where the source material allows (e.g., explicit thresholds, scenario coverage, assurance cadence) without inventing unsupported facts."
+                    " Ensure every change is grounded in the provided retrieval chunks or online context, citing them in the same format as before, and highlight why the refinement improves usefulness for the reporting audience."
+                    " Respond strictly with the JSON schema described in the instructions so downstream systems can ingest your output.",
+                ),
+                (
+                    "human",
+                    "Document: {doc}\nType: {doc_type}\nSummary: {summary}\n\n"
+                    "Prior requirements bundle: {existing}\n\nRetrieved chunks: {chunks}\n\nOnline insights: {web}\n\n{format_instructions}",
+                ),
+            ]
+        )
+        chain = prompt | self.requirements_model | parser
+
+        chunk_text = json.dumps(state.get("retrieval_results", []))
+        web_text = json.dumps(state.get("web_context", []))
+        existing_text = json.dumps(prior_bundle.model_dump())
+
+        refined_bundle: RequirementBundle = await chain.ainvoke(
+            {
+                "doc": state.get("doc_source"),
+                "doc_type": state.get("document_type", "unknown"),
+                "summary": state.get("document_summary", ""),
+                "existing": existing_text,
+                "chunks": chunk_text,
+                "web": web_text,
+                "format_instructions": format_instructions,
+            }
+        )
+        await self._log_event(
+            "requirements_refinement",
+            {
+                "doc_source": state.get("doc_source"),
+                "document_type": state.get("document_type"),
+                "previous_business_requirement_count": len(prior_bundle.business_requirements),
+                "previous_data_requirement_count": len(prior_bundle.data_requirements),
+                "business_requirement_count": len(refined_bundle.business_requirements),
+                "data_requirement_count": len(refined_bundle.data_requirements),
+            },
+        )
+        return {"requirements": refined_bundle.model_dump()}
 
     async def arun(self, state: AgenticState) -> AgenticState:
         result = await self.graph.ainvoke(state)

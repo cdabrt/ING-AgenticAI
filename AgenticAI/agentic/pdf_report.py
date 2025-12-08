@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import unicodedata
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
@@ -113,10 +114,23 @@ def _write_indented_line(pdf: FPDF, text: str, *, indent: int) -> None:
     indent = max(indent, 0)
     x_position = pdf.l_margin + indent
     pdf.set_x(x_position)
-    pdf.multi_cell(0, 5, text)
+    pdf.multi_cell(0, 5, _sanitize_text(text))
 
 
 def _full_width_multicell(pdf: FPDF, text: str, *, height: float) -> None:
     available_width = max(pdf.w - pdf.l_margin - pdf.r_margin, 10)
     pdf.set_x(pdf.l_margin)
-    pdf.multi_cell(available_width, height, text)
+    pdf.multi_cell(available_width, height, _sanitize_text(text))
+
+
+def _sanitize_text(text: str) -> str:
+    replacements = {
+        "\u2013": "-",
+        "\u2014": "-",
+        "\u2022": "*",
+        "\xa0": " ",
+    }
+    for old, new in replacements.items():
+        text = text.replace(old, new)
+    normalized = unicodedata.normalize("NFKD", text)
+    return normalized.encode("ascii", "ignore").decode("ascii")
