@@ -2,7 +2,7 @@ from abc import abstractmethod, ABC
 from typing import List, Dict
 from warnings import deprecated
 
-from Vectorization.StoredChunk import StoredChunk
+from AgenticAI.Vectorization.StoredChunk import StoredChunk
 
 
 class IVectorStore(ABC):

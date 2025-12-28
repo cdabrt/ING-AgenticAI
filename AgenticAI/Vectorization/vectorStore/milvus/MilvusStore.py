@@ -13,8 +13,8 @@ from pymilvus import (
     WeightedRanker,
 )
 from sentence_transformers import CrossEncoder
-from Vectorization.StoredChunk import StoredChunk
-from Vectorization.vectorStore.VectorStoreAdapter import IVectorStore
+from AgenticAI.Vectorization.StoredChunk import StoredChunk
+from AgenticAI.Vectorization.vectorStore.VectorStoreAdapter import IVectorStore
 
 logger = logging.getLogger(__name__)
 
@@ -213,11 +213,14 @@ class MilvusStore(IVectorStore):
         page_number = 0
         result = []
         query_sparse_embedding, query_dense_embedding = self._query_embedding(query)
+        logger.info(f'using {category} search')
         while True:
             if category == 'sparse':
                 page_result = self._sparse_search(query_sparse_embedding, query, page_number)
             elif category == 'dense':
+                logger.info(f'searching page {page_number}')
                 page_result = self._dense_search(query_dense_embedding, query, page_number)
+                logger.info(f'page {page_number} got {len(page_result)} results')   
             elif category == 'hybrid':
                 page_result = self._hybrid_search(query_sparse_embedding, query_dense_embedding, reranker, query,
                                                   page_number)
@@ -226,13 +229,13 @@ class MilvusStore(IVectorStore):
 
             if page_result[-1].score >= rerank_score:
                 result += page_result
-                continue
             else:
                 for index, record in enumerate(page_result):
                     if record.score < rerank_score:
                         result += page_result[:index]
                         break
                 break
+            page_number += 1
         return sorted(result, key=lambda x: x.score, reverse=True)
 
     @override
@@ -244,6 +247,7 @@ class MilvusStore(IVectorStore):
 
     @override
     def dense_search(self, query: str, rerank_score=0.35) -> list[StoredChunk]:
+        print('using dense search')
         return self._continue_search(query, 'dense', rerank_score)
 
     def _hybrid_search(self, sparse_embedding, dense_embedding, reranker, query: str, page_number=0, length=10) -> list[
@@ -265,10 +269,11 @@ class MilvusStore(IVectorStore):
             rerank=reranker,
             limit=length,
             output_fields=self._output_fields(),
-            param={
-                **self._search_params(),
-                "offset": page_number * length
-            }
+            # param={
+            #     **self._search_params(),
+            #     "offset": page_number * length
+            # }
+            offset=page_number * length
         )[0]
         return self._post_search(query, result, length)
 

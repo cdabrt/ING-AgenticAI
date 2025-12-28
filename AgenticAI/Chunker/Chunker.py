@@ -2,7 +2,7 @@ import re
 import uuid
 from typing import List, Optional, Tuple
 from .Chunk import Chunk
-from PDF.Document import ElementType, Document, Metadata
+from AgenticAI.PDF.Document import ElementType, Document, Metadata
 
 # Made static as the chunker is built from pure functions. No state or options have to be saved.
 class Chunker:

@@ -3,14 +3,14 @@ import logging
 from typing import List, Dict
 from dotenv import load_dotenv
 import os
-from Chunker.Chunk import Chunk
-from Chunker.Chunker import Chunker
-from PDF.PDFParser import PDFParser
-from Vectorization.StoredChunk import StoredChunk
-from Vectorization.VectorEmbedder import VectorEmbedder
-from Vectorization.vectorStore.faiss.FAISS import FAISSStore
-from Vectorization.vectorStore.VectorStoreAdapter import IVectorStore
-from Vectorization.vectorStore.milvus.MilvusStore import MilvusStore
+from AgenticAI.Chunker.Chunk import Chunk
+from AgenticAI.Chunker.Chunker import Chunker
+from AgenticAI.PDF.PDFParser import PDFParser
+from AgenticAI.Vectorization.StoredChunk import StoredChunk
+from AgenticAI.Vectorization.VectorEmbedder import VectorEmbedder
+from AgenticAI.Vectorization.vectorStore.faiss.FAISS import FAISSStore
+from AgenticAI.Vectorization.vectorStore.VectorStoreAdapter import IVectorStore
+from AgenticAI.Vectorization.vectorStore.milvus.MilvusStore import MilvusStore
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
@@ -33,7 +33,7 @@ def store_chunks_and_embeds(chunk_list: List[Chunk]):
     results = vector_store.top_k_search(query_embedding, top_k=10)
 
     for r in results:
-        chunk = Chunk.model_validate_json(r["chunk"])
+        chunk = Chunker.model_validate_json(r["chunk"])
 
         print("Similarity score:", r["score"])
         print("ChunkId:", chunk.chunk_id)
@@ -61,5 +61,5 @@ if __name__ == "__main__":
 
     print("Loading stored chunks...")
     mil = MilvusStore(os.getenv("MILVUS_URI"), os.getenv("MILVUS_TOKEN"), os.getenv("MILVUS_COLLECTION"))
-    ret = mil.top_k_sparse_search("Sustainability reporting obligations for companies in the EU", top_k=5)
+    ret = mil.hybrid_search("Sustainability reporting obligations for companies in the EU")
     print(ret)

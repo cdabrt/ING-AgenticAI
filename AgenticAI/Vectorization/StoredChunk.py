@@ -1,7 +1,7 @@
 from typing import Optional
 
 from pydantic import BaseModel
-from Chunker.Chunk import Chunk
+from AgenticAI.Chunker.Chunk import Chunk
 
 
 class StoredChunk(BaseModel):

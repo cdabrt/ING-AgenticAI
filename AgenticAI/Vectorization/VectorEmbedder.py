@@ -2,7 +2,7 @@ from typing import List, Dict
 from warnings import deprecated
 
 from sentence_transformers import SentenceTransformer
-from Chunker.Chunk import Chunk
+from AgenticAI.Chunker.Chunk import Chunk
 
 @deprecated('do not used any longer')
 class VectorEmbedder:
