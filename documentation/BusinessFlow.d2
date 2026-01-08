@@ -1,0 +1,58 @@
+direction: right
+
+vars: {
+  analyst-color: "#1ba1e2"
+  analyst-stroke: "#006EAF"
+  system-color: "#dae8fc"
+  system-stroke: "#6c8ebf"
+  output-color: "#fff2cc"
+  output-stroke: "#d6b656"
+  process-color: "#d5e8d4"
+  process-stroke: "#82b366"
+}
+
+# Actors and stages
+analyst: {
+  shape: person
+  label: Business Analyst
+  style: {
+    fill: ${analyst-color}
+    stroke: ${analyst-stroke}
+  }
+}
+
+upload: {
+  label: Upload\nRegulatory PDFs
+  shape: rectangle
+  style: {
+    fill: ${system-color}
+    stroke: ${system-stroke}
+  }
+}
+
+process: {
+  label: AI Processing:\n• Parse documents\n• Extract regulations\n• Search additional\n context online
+  shape: rectangle
+  style: {
+    fill: ${process-color}
+    stroke: ${process-stroke}
+  }
+}
+
+requirements: {
+  label: Generate\nRequirements
+  shape: rectangle
+  style: {
+    fill: ${output-color}
+    stroke: ${output-stroke}
+  }
+}
+
+# Flow
+analyst -> upload: Provides documents
+upload -> process: PDFS used in
+process -> process: Feedback loop
+process -> requirements: With help of PDFs and context
+requirements -> analyst: Delivered to analyst for review {
+    style.stroke-dash: 5
+}

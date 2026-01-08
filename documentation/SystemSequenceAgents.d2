@@ -1,0 +1,81 @@
+vars: {
+    # Agent colors (yellow)
+    agent-fill: "#fff2cc"
+    agent-stroke: "#d6b656"
+    
+    # MCP colors (purple)
+    mcp-fill: "#e1d5e7"
+    mcp-stroke: "#9673a6"
+    
+    # Vector store (blue)
+    store-fill: "#dae8fc"
+    store-stroke: "#6c8ebf"
+    
+    # Web service (blue)
+    web-fill: "#0080F0"
+    web-stroke: "#0080F0"
+}
+
+Sequence Diagram Agent Orchestration: {
+    shape: sequence_diagram
+    
+    # Actors
+    analyst: "Business Analyst"
+    runner: "AgenticGraphRunner"
+    agent1: "ChatGoogleGenerativeAI\n(query_model)"
+    mcp: "MCPToolClient"
+    faiss: "FAISSStore"
+    ddg: "DDGS"
+    agent2: "ChatGoogleGenerativeAI\n(requirements_model)"
+    
+    # Flow
+    analyst.t1 -> runner.t2: "run(doc_text, doc_headings)"
+    
+    runner.t3 -> agent1.t4: "QuerySpecification prompt"
+    agent1.t4 -> runner.t3: "queries[], document_summary, document_type"
+    
+    runner.t5 -> mcp.t6: "call_tool('retrieve_chunks', query)"
+    mcp.t7 -> faiss.t8: "top_k_search(query_embedding)"
+    faiss.t8 -> mcp.t7: "results[]"
+    mcp.t6 -> runner.t5: "retrieval_results[]"
+    
+    runner.t9 -> agent1.t10: "ContextAssessment prompt"
+    agent1.t10 -> runner.t9: "needs_additional_context, missing_information_queries[]"
+    
+    runner.t11 -> mcp.t12: "call_tool('web_search', query)" {
+        style.stroke-dash: 5
+    }
+    mcp.t13 -> ddg.t14: "text(query, max_results=5)"
+    ddg.t14 -> mcp.t13: "search_results[]"
+    mcp.t12 -> runner.t11: "web_candidates[]" {
+        style.stroke-dash: 5
+    }
+    
+    runner.t15 -> agent1.t16: "WebSourceSelection prompt" {
+        style.stroke-dash: 5
+    }
+    agent1.t16 -> runner.t15: "selected_urls[], rationales[]" {
+        style.stroke-dash: 5
+    }
+    
+    runner.t17 -> mcp.t18: "call_tool('fetch_web_page', url)" {
+        style.stroke-dash: 5
+    }
+    mcp.t19 -> ddg.t20: "GET url (httpx)"
+    ddg.t20 -> mcp.t19: "page_content"
+    mcp.t18 -> runner.t17: "web_content" {
+        style.stroke-dash: 5
+    }
+    
+    runner.t21 -> agent1.t22: "WebContentDecision prompt" {
+        style.stroke-dash: 5
+    }
+    agent1.t22 -> runner.t21: "include, rationale, summary" {
+        style.stroke-dash: 5
+    }
+    
+    runner.t23 -> agent2.t24: "RequirementBundle prompt"
+    agent2.t24 -> runner.t23: "RequirementBundle"
+    
+    runner.t2 -> analyst.t1: "RequirementBundle"
+}

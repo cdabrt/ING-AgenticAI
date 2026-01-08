@@ -1,0 +1,291 @@
+direction: right
+
+vars: {
+    # Ingestion colors (blue)
+    blue-fill: "#dae8fc"
+    blue-stroke: "#6c8ebf"
+    
+    # MCP Server colors (pink/red)
+    pink-fill: "#f8cecc"
+    pink-stroke: "#b85450"
+    
+    # Orchestration colors (yellow)
+    yellow-fill: "#fff2cc"
+    yellow-stroke: "#d6b656"
+    
+    # MCP tools colors (purple)
+    purple-fill: "#e1d5e7"
+    purple-stroke: "#9673a6"
+    
+    # Orange elements (deterministic search, requirements)
+    orange-fill: "#D79B00"
+    orange-stroke: "#f0a30a"
+    
+    # Requirements output
+    req-orange-fill: "#f0a30a"
+    req-orange-stroke: "#BD7000"
+    
+    # PDF input
+    pdf-blue-fill: "#1ba1e2"
+    pdf-blue-stroke: "#006EAF"
+    
+    # DuckDuckGo
+    ddg-blue: "#0080F0"
+    
+    # Feedback loop
+    feedback-stroke: "#000000"
+
+    d2-config: {
+        layout-engine: elk
+    }
+}
+
+# Business Analyst with PDF
+analyst: {
+    shape: person
+    label: "Business Analyst"
+}
+
+pdfs: {
+    shape: page
+    label: "PDF(s)"
+    style.fill: ${pdf-blue-fill}
+    style.stroke: ${pdf-blue-stroke}
+}
+
+# Ingestion container
+ingestion: {
+    label: "Ingestion"
+    style.fill: ${blue-fill}
+    style.stroke: ${blue-stroke}
+    style.stroke-width: 3
+    style.stroke-dash: 5
+  
+    parser: {
+        label: "Parser"
+        shape: rectangle
+        style.fill: ${blue-fill}
+        style.stroke: ${blue-stroke}
+    }
+    
+    chunker: {
+        label: "Chunker"
+        shape: rectangle
+        style.fill: ${blue-fill}
+        style.stroke: ${blue-stroke}
+    }
+  
+    vector_store: {
+        label: "Vector Store"
+        shape: cylinder
+        style.fill: ${blue-fill}
+        style.stroke: ${blue-stroke}
+    }
+    
+    pipeline_runner: {
+        label: "Pipeline Runner"
+        shape: rectangle
+        style.fill: ${blue-fill}
+        style.stroke: ${blue-stroke}
+    }
+    
+}
+
+# MCP Server container
+mcp_server: {
+    label: "MCP Server"
+    style.fill: ${pink-fill}
+    style.stroke: ${pink-stroke}
+    style.stroke-width: 3
+    style.stroke-dash: 5
+    
+    retrieve_chunks: {
+        label: "Retrieve chunks"
+        shape: rectangle
+        style.fill: ${purple-fill}
+        style.stroke: ${purple-stroke}
+    }
+    
+    web_search: {
+        label: "Web search"
+        shape: rectangle
+        style.fill: ${purple-fill}
+        style.stroke: ${purple-stroke}
+    }
+}
+
+# DuckDuckGo
+duckduckgo: {
+    label: "DuckDuckGo"
+    shape: cloud
+    icon: https://api.iconify.design/mdi:web.svg
+    style.fill: ${ddg-blue}
+    style.stroke: ${ddg-blue}
+}
+
+# LangGraph Orchestration container
+orchestration: {
+    label: "LangGraph nodes Agent Orchestration"
+    style.fill: ${yellow-fill}
+    style.stroke: ${yellow-stroke}
+    style.stroke-width: 3
+    style.stroke-dash: 5
+    
+    vector_search: {
+        label: "Deterministic\nvector\nsearch"
+        shape: queue
+        style.fill: ${yellow-fill}
+        style.stroke: ${orange-stroke}
+    }
+    
+    retrieval_results: {
+        label: "Retrieval results"
+        shape: page
+        style.fill: ${yellow-fill}
+        style.stroke: ${yellow-stroke}
+    }
+    
+    context_assessor: {
+        label: "Context\nassessor"
+        shape: parallelogram
+        style.fill: ${yellow-fill}
+        style.stroke: ${orange-stroke}
+    }
+    
+    # Web result feedback loop - dashed box
+    feedback: {
+        label: "Web result feedback loop"
+        style.stroke-dash: 5
+        style.stroke-width: 3
+        style.stroke: ${feedback-stroke}
+        style.fill: transparent
+        
+        agent1: {
+        label: "Agent 1:\nregulatory discovery\nstrategist"
+        shape: rectangle
+        style.fill: ${yellow-fill}
+        style.stroke: ${orange-stroke}
+        }
+        
+        web_results: {
+        label: "Web results"
+        shape: document
+        style.fill: ${yellow-fill}
+        style.stroke: ${yellow-stroke}
+        }
+    }
+    
+    agent2: {
+        label: "Agent 2:\nregulatory implementation\narchitect"
+        shape: rectangle
+        style.fill: ${yellow-fill}
+        style.stroke: ${orange-stroke}
+    }
+}
+
+# Output
+requirements: {
+    shape: document
+    label: "Business and\nData Requirements"
+    style.fill: ${req-orange-fill}
+    style.stroke: ${req-orange-stroke}
+}
+
+
+# Ingestion connections
+analyst -> pdfs : "uploads pdfs" {
+    style.stroke: ${blue-stroke}
+}
+
+pdfs -> ingestion.pipeline_runner : "" {
+    style.stroke: ${blue-stroke}
+}
+
+ingestion.pipeline_runner -> ingestion.parser : "" {
+    style.stroke: ${blue-stroke}
+}
+
+ingestion.parser -> ingestion.pipeline_runner : "" {
+    style.stroke: ${blue-stroke}
+}
+
+ingestion.pipeline_runner -> ingestion.chunker : "" {
+    style.stroke: ${blue-stroke}
+}
+
+ingestion.chunker -> ingestion.pipeline_runner : "" {
+    style.stroke: ${blue-stroke}
+}
+
+ingestion.pipeline_runner -> ingestion.vector_store : "" {
+    style.stroke: ${blue-stroke}
+}
+
+ingestion.vector_store -> ingestion.pipeline_runner : "" {
+    style.stroke: ${blue-stroke}
+}
+
+ingestion.pipeline_runner -> orchestration.feedback.agent1 : "Feeds parsed PDF data to" {
+    style.stroke: ${blue-stroke}
+}
+
+
+# MCP connections
+mcp_server.web_search -> duckduckgo : "Searches on web" {
+    style.stroke: ${pink-stroke}
+}
+
+mcp_server.retrieve_chunks -> ingestion.vector_store : "Retrieves chunks and embedded vectors from" {
+    style.stroke: ${pink-stroke}
+}
+
+
+# LangGraph Orchestration connections
+orchestration.feedback.agent1 -> orchestration.vector_search : "Using PDF parser output: \n Creates queries to embed in" {
+    style.stroke: ${yellow-stroke}
+}
+
+orchestration.vector_search -> orchestration.retrieval_results : "" {
+    style.stroke: ${yellow-stroke}
+}
+
+orchestration.vector_search -> mcp_server.retrieve_chunks : "For each query" {
+    style.stroke: ${yellow-stroke}
+}
+
+# Context assessor
+orchestration.retrieval_results -> orchestration.context_assessor : "Assessed by" {
+    style.stroke: ${yellow-stroke}
+}
+
+orchestration.context_assessor -> mcp_server.web_search : "When additional context is needed" {
+    style.stroke: ${yellow-stroke}
+}
+
+orchestration.context_assessor -> orchestration.feedback.web_results : "" {
+    style.stroke: ${yellow-stroke}
+}
+
+# Agent 2
+orchestration.retrieval_results -> orchestration.agent2 : "" {
+    style.stroke: ${yellow-stroke}
+}
+
+orchestration.agent2 -> requirements : "Returns Business and Data Requirements to Business Analyst" {
+    style.stroke: ${yellow-stroke}
+}
+
+# LangGraph Feedback Loop connections
+orchestration.feedback.agent1 -> orchestration.retrieval_results : "Validated web results added to" {
+    style.stroke: ${yellow-stroke}
+}
+
+orchestration.feedback.web_results -> orchestration.feedback.agent1 : "Validated by" {
+    style.stroke: ${yellow-stroke}
+}
+
+
+# Output
+requirements -> analyst : "" {
+    style.stroke: ${yellow-stroke}
+}
