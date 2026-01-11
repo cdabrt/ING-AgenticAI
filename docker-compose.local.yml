@@ -9,10 +9,8 @@ services:
 
   backend:
     build:
-      context: .
-      dockerfile: ./AgenticAI/Dockerfile
-    env_file:
-      - .env
+      context: ./AgenticAI
+      dockerfile: Dockerfile
     ports:
       - "8000:8000"
     container_name: backend
