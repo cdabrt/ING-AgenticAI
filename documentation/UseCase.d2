@@ -1,0 +1,84 @@
+direction: right
+
+vars: {
+  analyst-color: "#1ba1e2"
+  analyst-stroke: "#006EAF"
+  usecase-color: "#dae8fc"
+  usecase-stroke: "#6c8ebf"
+  system-color: "#fff2cc"
+  system-stroke: "#d6b656"
+}
+
+# Actor
+analyst: {
+  shape: person
+  label: Business Analyst
+  style: {
+    fill: ${analyst-color}
+    stroke: ${analyst-stroke}
+  }
+}
+
+# System boundary
+system: {
+  label: AgenticAI System
+  style: {
+    fill: ${system-color}
+    stroke: ${system-stroke}
+    stroke-width: 3
+    stroke-dash: 5
+  }
+
+  gather: {
+    label: Gather\nRegulatory PDFs
+    shape: oval
+    style: {
+      fill: ${usecase-color}
+      stroke: ${usecase-stroke}
+    }
+  }
+
+  upload: {
+    label: Upload\nDocuments
+    shape: oval
+    style: {
+      fill: ${usecase-color}
+      stroke: ${usecase-stroke}
+    }
+  }
+
+  review: {
+    label: Review Generated\nRequirements
+    shape: oval
+    style: {
+      fill: ${usecase-color}
+      stroke: ${usecase-stroke}
+    }
+  }
+
+  trace: {
+    label: Trace Citations\nto Source
+    shape: oval
+    style: {
+      fill: ${usecase-color}
+      stroke: ${usecase-stroke}
+    }
+  }
+}
+
+# Interactions
+analyst -> system.gather
+analyst -> system.upload
+analyst -> system.review
+analyst -> system.trace
+
+# Dependencies (require upload to be completed first)
+system.review -> system.upload: "<<include>>" {
+  style.stroke-dash: 5
+}
+system.trace -> system.upload: "<<include>>" {
+  style.stroke-dash: 5
+}
+system.gather -> system.upload: "<<include>>" {
+  style.stroke-dash: 5
+}

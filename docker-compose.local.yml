@@ -1,0 +1,18 @@
+services:
+  frontend:
+    build:
+      context: ./Frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    container_name: frontend
+
+  backend:
+    build:
+      context: ./AgenticAI
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    container_name: backend
+    depends_on:
+      - frontend

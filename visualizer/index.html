@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Regulatory Requirements Viewer</title>
+    <style>
+      :root {
+        font-family: "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        --accent: #0061ff;
+        --border: rgba(10, 31, 68, 0.15);
+        --muted: rgba(10, 31, 68, 0.65);
+        --page-bg: #f5f6fb;
+        --card-bg: #ffffff;
+        --text-color: #0a1f44;
+      }
+
+      body {
+        margin: 0;
+        padding: 0;
+        background: var(--page-bg);
+        color: var(--text-color);
+      }
+
+      header {
+        background: var(--card-bg);
+        border-bottom: 1px solid var(--border);
+        padding: 1rem;
+        position: sticky;
+        top: 0;
+        z-index: 10;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 1rem;
+        align-items: center;
+      }
+
+      header h1 {
+        margin: 0;
+        font-size: 1.25rem;
+      }
+
+      header select,
+      header button {
+        padding: 0.4rem 0.7rem;
+        font-size: 0.95rem;
+        border-radius: 6px;
+        border: 1px solid var(--border);
+        background: var(--card-bg);
+        cursor: pointer;
+      }
+
+      header button {
+        background: var(--accent);
+        color: white;
+        border: none;
+      }
+
+      .visually-hidden {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        margin: -1px;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+        border: 0;
+      }
+
+      main {
+        max-width: 1100px;
+        margin: 0 auto;
+        padding: 1.5rem;
+      }
+
+      section {
+        background: var(--card-bg);
+        margin-bottom: 1.25rem;
+        border-radius: 10px;
+        border: 1px solid var(--border);
+        padding: 1.25rem;
+        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+      }
+
+      section h2 {
+        margin-top: 0;
+        margin-bottom: 0.75rem;
+      }
+
+      .requirement-card {
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 1rem;
+        margin-bottom: 0.75rem;
+        background: #fdfefe;
+      }
+
+      .requirement-card h3 {
+        margin: 0 0 0.3rem 0;
+        font-size: 1.05rem;
+      }
+
+      .requirement-id {
+        font-family: "SFMono-Regular", Menlo, Consolas, monospace;
+        font-size: 0.85rem;
+        color: var(--muted);
+      }
+
+      .sources {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.4rem;
+        margin: 0.4rem 0 0 0;
+        padding: 0;
+        list-style: none;
+      }
+
+      .source-pill {
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        padding: 0.15rem 0.6rem;
+        font-size: 0.85rem;
+        background: rgba(0, 97, 255, 0.08);
+        color: #003c99;
+        text-decoration: none;
+        line-height: 1.7;
+      }
+
+      .source-pill:hover {
+        opacity: 0.85;
+      }
+
+      .placeholder {
+        color: var(--muted);
+        font-style: italic;
+        margin: 0.4rem 0 0 0;
+      }
+
+      .assumptions-list {
+        padding-left: 1rem;
+      }
+
+      .error-banner {
+        background: #ffe5e7;
+        color: #5c0008;
+        border: 1px solid #f4b4bb;
+        border-radius: 6px;
+        padding: 0.75rem;
+        margin-bottom: 1rem;
+        display: none;
+      }
+
+      @media (max-width: 640px) {
+        header {
+          flex-direction: column;
+          align-items: flex-start;
+        }
+
+        header select,
+        header button {
+          width: 100%;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>Regulatory Requirements Viewer</h1>
+      <label>
+        <span class="visually-hidden">Select document</span>
+        <select id="docSelect"></select>
+      </label>
+      <button id="refreshBtn" type="button">Reload JSON</button>
+    </header>
+
+    <main>
+      <div id="error" class="error-banner"></div>
+
+      <section>
+        <h2>Document Summary</h2>
+        <p><strong>Document:</strong> <span id="docName">—</span></p>
+        <p><strong>Type:</strong> <span id="docType">—</span></p>
+        <p><strong>Summary:</strong></p>
+        <p id="docSummary" class="placeholder">Select a document to view its summary.</p>
+      </section>
+
+      <section>
+        <h2>Business Requirements</h2>
+        <div id="businessList"></div>
+      </section>
+
+      <section>
+        <h2>Data Requirements</h2>
+        <div id="dataList"></div>
+      </section>
+
+      <section>
+        <h2>Assumptions</h2>
+        <ul id="assumptions" class="assumptions-list"></ul>
+      </section>
+    </main>
+
+    <script>
+      const DATA_URL = new URL("../artifacts/requirements.json", document.baseURI).href;
+      const DATA_PDF_ROOT = new URL("../data/", document.baseURI);
+      const docSelect = document.getElementById("docSelect");
+      const refreshBtn = document.getElementById("refreshBtn");
+      const errorBanner = document.getElementById("error");
+
+      const docNameEl = document.getElementById("docName");
+      const docTypeEl = document.getElementById("docType");
+      const docSummaryEl = document.getElementById("docSummary");
+      const businessListEl = document.getElementById("businessList");
+      const dataListEl = document.getElementById("dataList");
+      const assumptionsEl = document.getElementById("assumptions");
+
+      let bundles = [];
+
+      function showError(message) {
+        errorBanner.textContent = message;
+        errorBanner.style.display = "block";
+      }
+
+      function clearError() {
+        errorBanner.textContent = "";
+        errorBanner.style.display = "none";
+      }
+
+      async function loadData() {
+        try {
+          clearError();
+          const response = await fetch(DATA_URL, { cache: "no-store" });
+          if (!response.ok) {
+            throw new Error(`Failed to load JSON (HTTP ${response.status})`);
+          }
+          bundles = await response.json();
+          if (!Array.isArray(bundles) || bundles.length === 0) {
+            throw new Error("No requirement bundles were found in artifacts/requirements.json.");
+          }
+          populateSelect();
+          renderBundle(bundles[0]);
+        } catch (error) {
+          console.error(error);
+          showError(error.message || "Unable to load requirements data.");
+        }
+      }
+
+      function populateSelect() {
+        docSelect.innerHTML = "";
+        bundles.forEach((bundle, index) => {
+          const option = document.createElement("option");
+          option.value = index;
+          option.textContent = `${bundle.document} (${bundle.document_type})`;
+          docSelect.appendChild(option);
+        });
+      }
+
+      function renderBundle(bundle) {
+        docNameEl.textContent = bundle.document;
+        docTypeEl.textContent = bundle.document_type;
+        docSummaryEl.textContent = bundle.summary || "(Summary not provided)";
+
+        renderRequirementList(businessListEl, bundle.business_requirements);
+        renderRequirementList(dataListEl, bundle.data_requirements);
+        renderAssumptions(bundle.assumptions || []);
+      }
+
+      function renderRequirementList(container, requirements) {
+        container.innerHTML = "";
+        if (!requirements || requirements.length === 0) {
+          const placeholder = document.createElement("p");
+          placeholder.className = "placeholder";
+          placeholder.textContent = "No requirements were generated.";
+          container.appendChild(placeholder);
+          return;
+        }
+
+        requirements.forEach((req) => {
+          const card = document.createElement("article");
+          card.className = "requirement-card";
+
+          const heading = document.createElement("h3");
+          heading.textContent = req.description || "Untitled requirement";
+
+          const meta = document.createElement("div");
+          meta.className = "requirement-id";
+          meta.textContent = req.id || "Unlabeled";
+
+          const rationale = document.createElement("p");
+          rationale.textContent = req.rationale || "No rationale provided.";
+
+          card.appendChild(heading);
+          card.appendChild(meta);
+          card.appendChild(rationale);
+
+          if (req.document_sources && req.document_sources.length > 0) {
+            card.appendChild(createSourcesList("Document sources", req.document_sources));
+          } else {
+            card.appendChild(createPlaceholder("No document citations."));
+          }
+
+          if (req.online_sources && req.online_sources.length > 0) {
+            card.appendChild(createSourcesList("Online sources", req.online_sources));
+          }
+
+          if (req.data_elements && req.data_elements.length > 0) {
+            const list = document.createElement("ul");
+            req.data_elements.forEach((item) => {
+              const li = document.createElement("li");
+              li.textContent = item;
+              list.appendChild(li);
+            });
+            card.appendChild(list);
+          }
+
+          container.appendChild(card);
+        });
+      }
+
+      function createPlaceholder(text) {
+        const el = document.createElement("p");
+        el.className = "placeholder";
+        el.textContent = text;
+        return el;
+      }
+
+      function createSourcesList(label, sources) {
+        const wrapper = document.createElement("div");
+        const title = document.createElement("strong");
+        title.textContent = `${label}:`;
+        wrapper.appendChild(title);
+
+        const list = document.createElement("ul");
+        list.className = "sources";
+
+        sources.forEach((source) => {
+          const { href, text } = getSourceLink(source);
+            const listItem = document.createElement("li");
+            if (href) {
+              const link = document.createElement("a");
+              link.href = href;
+              link.textContent = text;
+              link.target = "_blank";
+              link.rel = "noreferrer noopener";
+              link.className = "source-pill";
+              listItem.appendChild(link);
+            } else {
+              const span = document.createElement("span");
+              span.textContent = text;
+              span.className = "source-pill";
+              listItem.appendChild(span);
+            }
+            list.appendChild(listItem);
+        });
+
+        wrapper.appendChild(list);
+        return wrapper;
+      }
+
+      function getSourceLink(source) {
+        if (!source) {
+          return { text: "Unknown", href: null };
+        }
+
+        if (/^https?:/i.test(source)) {
+          try {
+            const url = new URL(source);
+            return { text: url.hostname || source, href: source };
+          } catch {
+            return { text: source, href: source };
+          }
+        }
+
+        const pageMatch = source.match(/page\s*(\d+)/i);
+        const fileMatch = source.match(/(.+?\.pdf)/i);
+        if (fileMatch) {
+          const fileName = fileMatch[1].trim();
+          const encoded = fileName
+            .split("/")
+            .map((segment) => encodeURIComponent(segment))
+            .join("/");
+          const base = new URL(DATA_PDF_ROOT.href);
+          let href = new URL(encoded, base).href;
+          if (pageMatch) {
+            href += `#page=${pageMatch[1]}`;
+          }
+          return { text: source, href };
+        }
+
+        return { text: source, href: null };
+      }
+
+      function renderAssumptions(assumptions) {
+        assumptionsEl.innerHTML = "";
+        if (assumptions.length === 0) {
+          const placeholder = document.createElement("p");
+          placeholder.className = "placeholder";
+          placeholder.textContent = "No assumptions documented.";
+          assumptionsEl.appendChild(placeholder);
+          return;
+        }
+
+        assumptions.forEach((item) => {
+          const li = document.createElement("li");
+          li.textContent = item;
+          assumptionsEl.appendChild(li);
+        });
+      }
+
+      docSelect.addEventListener("change", (event) => {
+        const index = Number(event.target.value);
+        const bundle = bundles[index];
+        if (bundle) {
+          renderBundle(bundle);
+        }
+      });
+
+      refreshBtn.addEventListener("click", loadData);
+      loadData();
+    </script>
+  </body>
+</html>
