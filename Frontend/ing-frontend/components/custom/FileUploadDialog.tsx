@@ -22,11 +22,13 @@ interface FileUploadDialogProps {
 export default function FileUploadDialog({ onUploadComplete, onClose }: FileUploadDialogProps) {
     const [files, setFiles] = useState<FileUploadItem[]>([]);
     const [isUploading, setIsUploading] = useState(false);
+    const [selectionNotice, setSelectionNotice] = useState<string | null>(null);
 
     const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
         if (e.target.files) {
-            const newFiles = Array.from(e.target.files)
-                .filter(file => file.type === "application/pdf")
+            const selectedFiles = Array.from(e.target.files);
+            const newFiles = selectedFiles
+                .filter(file => file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf"))
                 .map(file => ({
                     file,
                     progress: 0,
@@ -35,11 +37,16 @@ export default function FileUploadDialog({ onUploadComplete, onClose }: FileUplo
 
             setFiles(prev => [...prev, ...newFiles]);
 
-            // Show alert if non-PDF files were selected
-            const nonPdfCount = e.target.files.length - newFiles.length;
+            const nonPdfCount = selectedFiles.length - newFiles.length;
             if (nonPdfCount > 0) {
-                alert(`${nonPdfCount} non-PDF file(s) were ignored. Only PDF files are accepted.`);
+                setSelectionNotice(`${nonPdfCount} non-PDF file(s) were ignored. Only PDF files are accepted.`);
+            } else if (newFiles.length > 0) {
+                setSelectionNotice(null);
+            } else if (selectedFiles.length > 0) {
+                setSelectionNotice("No PDF files were selected.");
             }
+
+            e.target.value = "";
         }
     };
 
@@ -49,9 +56,13 @@ export default function FileUploadDialog({ onUploadComplete, onClose }: FileUplo
 
     const uploadFiles = async () => {
         setIsUploading(true);
+        setSelectionNotice(null);
+        let attemptedUploads = 0;
+        let successfulUploads = 0;
 
         for (let i = 0; i < files.length; i++) {
             if (files[i].status !== "pending") continue;
+            attemptedUploads += 1;
 
             const formData = new FormData();
             formData.append("file", files[i].file);
@@ -79,6 +90,7 @@ export default function FileUploadDialog({ onUploadComplete, onClose }: FileUplo
                         });
                     },
                 });
+                successfulUploads += 1;
 
                 // Mark as success
                 setFiles(prev => {
@@ -87,13 +99,19 @@ export default function FileUploadDialog({ onUploadComplete, onClose }: FileUplo
                     return updated;
                 });
             } catch (error) {
+                let message = "Upload failed";
+                if (axios.isAxiosError(error)) {
+                    message = error.response?.data?.detail || error.message;
+                } else if (error instanceof Error) {
+                    message = error.message;
+                }
                 // Mark as error
                 setFiles(prev => {
                     const updated = [...prev];
                     updated[i] = {
                         ...updated[i],
                         status: "error",
-                        error: error instanceof Error ? error.message : "Upload failed",
+                        error: message,
                     };
                     return updated;
                 });
@@ -102,9 +120,7 @@ export default function FileUploadDialog({ onUploadComplete, onClose }: FileUplo
 
         setIsUploading(false);
 
-        // Check if all uploads were successful
-        const allSuccess = files.every(f => f.status === "success");
-        if (allSuccess && onUploadComplete) {
+        if (attemptedUploads > 0 && successfulUploads === attemptedUploads && onUploadComplete) {
             onUploadComplete();
         }
     };
@@ -149,6 +165,11 @@ export default function FileUploadDialog({ onUploadComplete, onClose }: FileUplo
                 </div>
             </CardHeader>
             <CardContent className="space-y-4">
+                {selectionNotice && (
+                    <Alert variant="destructive">
+                        <AlertDescription>{selectionNotice}</AlertDescription>
+                    </Alert>
+                )}
                 {/* File Input */}
                 <div className="flex gap-2">
                     <Button

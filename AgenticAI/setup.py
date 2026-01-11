@@ -17,9 +17,11 @@ setup(
         "langgraph>=0.0.20",
         "langchain-google-genai>=1.0.0",
         "ddgs",
+        "modelcontextprotocol",
         "python-dotenv>=1.0.0",
         "httpx>=0.25.0",
         "beautifulsoup4>=4.12.0",
+        "fpdf2>=2.7.9",
         "fastapi>=0.100.0",
         "uvicorn>=0.23.0"
     ],

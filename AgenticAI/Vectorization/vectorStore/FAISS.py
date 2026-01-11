@@ -1,6 +1,6 @@
 import logging
 from pathlib import Path
-from typing import override, List, Dict
+from typing import List, Dict
 
 import faiss
 import numpy
@@ -22,7 +22,6 @@ class FAISSStore(IVectorStore):
         # This is why FAISS is meant to be used in development, and not in production
         self.chunk_store: List[Chunk] = []
 
-    @override
     def store_embeds_and_metadata(self, chunks_with_embeds : List[Dict]):
         logger.info("Storing %s embeddings into FAISS (current total=%s)", len(chunks_with_embeds), self.index.ntotal)
         embeddings = numpy.array([chunk['embedding'] for chunk in chunks_with_embeds], dtype='float32')
@@ -45,7 +44,6 @@ class FAISSStore(IVectorStore):
         self.chunk_store.extend([chunk['chunk'] for chunk in chunks_with_embeds])
         logger.info("FAISS index size is now %s", self.index.ntotal)
 
-    @override
     def top_k_search(self, query_embedding, top_k=5):
         query_vec = numpy.array([query_embedding], dtype='float32')
         if self.use_cosine_similarity:

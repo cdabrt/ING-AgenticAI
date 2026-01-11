@@ -17,11 +17,9 @@ from AgenticAI.PDF.PDFParser import PDFParser
 from AgenticAI.agentic.decision_logger import DecisionLogger
 from AgenticAI.agentic.documents import group_documents_by_source
 from AgenticAI.agentic.langgraph_runner import AgenticGraphRunner, AgenticState
+from AgenticAI.agentic.pdf_report import render_requirements_pdf
 from AgenticAI.mcp.client import MCPToolClient
 from AgenticAI.pipeline.ingestion import ingest_documents, vector_store_exists
-
-from AgenticAI.agentic.models import RequirementBundle
-from AgenticAI.agentic.models import RequirementItem
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
@@ -88,6 +86,11 @@ def parse_args() -> argparse.Namespace:
         "--output",
         default="artifacts/requirements.json",
         help="Path where the consolidated requirements JSON will be saved",
+    )
+    parser.add_argument(
+        "--pdf-output",
+        default="artifacts/requirements.pdf",
+        help="Path where the readable PDF export will be saved",
     )
     parser.add_argument(
         "--decision-log",
@@ -198,34 +201,12 @@ async def run_pipeline(args: argparse.Namespace):
 
     logger.info("Wrote %s requirement bundles to %s", len(output_records), output_path)
 
-# TODO Delete this mock function
-def mock_run_pipeline():
-    logger.info("Mock run_pipeline called - no operation performed.")
+    try:
+        pdf_path = render_requirements_pdf(output_records, args.pdf_output)
+        logger.info("Rendered PDF summary to %s", pdf_path)
+    except Exception:  # noqa: BLE001 - diagnostics for PDF failures
+        logger.exception("Failed to render PDF summary")
 
-
-    req1 = RequirementItem(
-        id="REQ-001",
-        description="The system shall encrypt all user data at rest using AES-256 encryption.",
-        rationale="To ensure data security and compliance with regulations.",
-        document_sources=["Document A - Section 3.2", "Document B - Page 5"],
-        online_sources=["https://example.com/security-guidelines"],
-    )
-    req2 = RequirementItem(
-        id="REQ-002",
-        description="The application shall support multi-factor authentication for all user accounts.",
-        rationale="To enhance account security and prevent unauthorized access.",
-        document_sources=["Document C - Section 4.1"],
-        online_sources=["https://example.com/authentication-best-practices"],
-    )
-
-    bundle = RequirementBundle()
-    bundle.document = "Mock Document"
-    bundle.document_type = "mock-type"
-    bundle.business_requirements = [req1, req2]
-    bundle.data_requirements = ['mock-data-req-1', 'mock-data-req-2']
-    bundle.assumptions = ['test assumption 1', 'test assumption 2']
-
-    return json.dumps([bundle], indent=2)
 
 def main():
     args = parse_args()

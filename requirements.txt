@@ -1,0 +1,16 @@
+pdfplumber
+sentence-transformers
+numpy
+pydantic
+faiss-cpu
+langchain
+langgraph
+langchain-google-genai
+ddgs
+modelcontextprotocol
+python-dotenv
+httpx
+beautifulsoup4
+fpdf2
+fastapi
+uvicorn
