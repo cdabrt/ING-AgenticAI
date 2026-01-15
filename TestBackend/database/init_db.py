@@ -1,7 +1,7 @@
 """
 Initialize the database by creating all tables defined in the models.
 """
-from contracts.models import Base
+from models.models import Base
 from database.engine.psycopg_connection import create_engine
 
 def init_database(drop_existing=False):

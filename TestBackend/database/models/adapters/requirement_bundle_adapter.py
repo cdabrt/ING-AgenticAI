@@ -5,10 +5,10 @@ from ..models import (
 )
 from AgenticAI.agentic.models import RequirementBundle as ModelRequirementBundle
 
-from .requirement_item_adapter import adapt_to_model as adapt_item_to_model
-from .requirement_item_adapter import adapt_to_contract as adapt_item_to_contract
+from .requirement_item_adapter import adapt_to_model as _adapt_item_to_model
+from .requirement_item_adapter import adapt_to_db_model as _adapt_item_to_db_model
 
-def adapt_to_contract(model_bundle: ModelRequirementBundle) -> ContractRequirementBundle:
+def adapt_to_db_model(model_bundle: ModelRequirementBundle) -> ContractRequirementBundle:
     """
     Adapts a ModelRequirementBundle (Pydantic) to ContractRequirementBundle (SQLAlchemy)
     for database persistence.
@@ -23,11 +23,11 @@ def adapt_to_contract(model_bundle: ModelRequirementBundle) -> ContractRequireme
     
     # Add business requirements
     for req in model_bundle.business_requirements:
-        contract_bundle.requirements.append(adapt_item_to_contract(req, RequirementType.BUSINESS))
+        contract_bundle.requirements.append(_adapt_item_to_db_model(req, RequirementType.BUSINESS))
     
     # Add data requirements
     for req in model_bundle.data_requirements:
-        contract_bundle.requirements.append(adapt_item_to_contract(req, RequirementType.DATA))
+        contract_bundle.requirements.append(_adapt_item_to_db_model(req, RequirementType.DATA))
     
     # Convert assumptions
     contract_bundle.assumptions = []
@@ -49,7 +49,7 @@ def adapt_to_model(contract_bundle: ContractRequirementBundle) -> ModelRequireme
     data_requirements = []
     
     for contract_req in contract_bundle.requirements:
-        model_req = adapt_item_to_model(contract_req)
+        model_req = _adapt_item_to_model(contract_req)
         # Add to appropriate list based on type
         if contract_req.type == RequirementType.BUSINESS:
             business_requirements.append(model_req)

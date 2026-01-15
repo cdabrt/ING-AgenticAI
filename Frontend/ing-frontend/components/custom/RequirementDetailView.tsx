@@ -6,12 +6,14 @@ import { ScrollArea } from "../ui/scroll-area";
 import { Button } from "../ui/button";
 import { Textarea } from "../ui/textarea";
 import { useState } from "react";
+import axios from "axios";
 
 function RequirementDetailView({ requirement }: { requirement: RequirementItem | null }) {
 
     const [isEditMode, setIsEditMode] = useState<boolean>(false);
     const [description, setDescription] = useState<string>("");
     const [rationale, setRationale] = useState<string>("");
+    const [error, setError] = useState<string | null>(null);
     
     if (!requirement) {
         return (
@@ -33,10 +35,17 @@ function RequirementDetailView({ requirement }: { requirement: RequirementItem |
 
     const handleToggleEditMode = () => {
         if (isEditMode) {
-            // Save logic could go here
-            console.log("Saving:", { description, rationale });
+            let tmp_requirement = { ...requirement, description, rationale };
+
+               setError(null);
+                axios.post('/api/requirement', tmp_requirement).catch((error) => {
+                    setError(error.message);
+                }).then((response) => {
+                    if (!response || !response.data) {
+                        setError("No data received!");
+                    }
+                });
         } else {
-            // Reset to current values when entering edit mode
             setDescription(requirement.description);
             setRationale(requirement.rationale);
         }

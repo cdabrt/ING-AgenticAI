@@ -1,3 +1,4 @@
+# Web contracts
 from typing import List
 
 from pydantic import BaseModel
@@ -17,14 +18,3 @@ class RequirementBundle(BaseModel):
     business_requirements: List[RequirementItem]
     data_requirements: List[RequirementItem]
     assumptions: List[str]
-
-class PDFDocument(BaseModel):
-    id: int
-    filename: str
-    pdf_data: bytes
-    sources: List[Source]
-
-class Source(BaseModel):
-    id: int
-    source_type: str
-    reference: str

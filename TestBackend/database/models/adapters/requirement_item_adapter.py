@@ -7,7 +7,7 @@ from ..models import (
 from AgenticAI.agentic.models import RequirementItem as ModelRequirementItem
 
 
-def adapt_to_contract(model_item: ModelRequirementItem, item_type: RequirementType) -> ContractRequirementItem:
+def adapt_to_db_model(model_item: ModelRequirementItem, item_type: RequirementType) -> ContractRequirementItem:
     """
     Adapts a ModelRequirementItem (Pydantic) to ContractRequirementItem (SQLAlchemy)
     for database persistence.
