@@ -26,7 +26,7 @@ class Source(BaseModel):
     reference: str
 
 class PDFDocument(BaseModel):
-    id: int
+    id: int | None = None
     filename: str
     pdf_data: bytes
-    sources: List[Source]
+    sources: List[Source] = []

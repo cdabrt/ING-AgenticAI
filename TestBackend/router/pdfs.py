@@ -2,6 +2,8 @@ from fastapi import APIRouter
 from fastapi import Depends, UploadFile, File, HTTPException
 from fastapi.responses import Response
 from repository.pdf_repository import PDFRepository
+from AgenticAI.agentic.contracts.adapters.pdf_adapter import pdf_document_to_contract
+from AgenticAI.agentic.models import PDFDocument
 
 router = APIRouter(prefix="/pdfs")
 
@@ -11,15 +13,8 @@ router = APIRouter(prefix="/pdfs")
 @router.get("")
 def get_all_pdfs(pdf_repository: PDFRepository = Depends(PDFRepository)):
     """Get all uploaded PDF documents (metadata only, not the binary data)"""
-    pdfs = pdf_repository.get_all_pdf_documents()
-    return [
-        {
-            "id": pdf.id,
-            "filename": pdf.filename,
-            "size": len(pdf.pdf_data)
-        }
-        for pdf in pdfs
-    ]
+    pdfs = pdf_repository.get_all_pdf_documents_deferred()
+    return [pdf_document_to_contract(pdf) for pdf in pdfs]
 
 @router.get("/{pdf_id}/download")
 def download_pdf(pdf_id: int, pdf_repository: PDFRepository = Depends(PDFRepository)):
@@ -68,9 +63,11 @@ async def upload_file(
     
     # Save to database
     saved_pdf = pdf_repository.save_pdf_document(
-        filename=file.filename,
-        pdf_data=contents
-    )
+        PDFDocument(
+            filename=file.filename,
+            pdf_data=contents,
+            sources=[]
+    ))
     
     return {
         "id": saved_pdf.id,

@@ -3,6 +3,9 @@ from typing import List
 
 from pydantic import BaseModel
 
+class PDFDocument(BaseModel):
+    id: int
+    filename: str
 
 class RequirementItem(BaseModel):
     id: str

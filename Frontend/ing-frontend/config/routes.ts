@@ -6,6 +6,7 @@ const bundle_prefix = "bundles"
 
 export const routes = {
     upload_pdf: `/${api_prefix}/${pdf_prefix}/upload`,
+    get_all_pdfs: `/${api_prefix}/${pdf_prefix}`,
     download_pdf: (pdf_id: number) => `/${api_prefix}/${pdf_prefix}/${pdf_id}/download`,
     get_requirement: (requirement_id: number) => `/${api_prefix}/${requirement_prefix}/${requirement_id}`,
     get_bundle: (bundle_id: number) => `/${api_prefix}/${bundle_prefix}/${bundle_id}`,

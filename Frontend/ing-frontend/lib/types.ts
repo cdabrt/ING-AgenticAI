@@ -15,3 +15,10 @@ export interface RequirementBundle {
     data_requirements: RequirementItem[];
     assumptions: string[];
 }
+
+export interface PDFItem {
+    id: number;
+    filename: string;
+    upload_date: string;
+    file_size?: number;
+}

@@ -13,7 +13,7 @@ import {
     useReactTable,
     VisibilityState,
 } from "@tanstack/react-table"
-import { ArrowUpDown, ArrowLeft } from "lucide-react"
+import { ArrowUpDown, ArrowLeft, Download, Trash2 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import {
@@ -24,42 +24,44 @@ import {
     TableHeader,
     TableRow,
 } from "@/components/ui/table"
-import { RequirementItem } from "@/lib/types"
+import { PDFItem } from "@/lib/types"
 
-interface RequirementListProps {
-    data: RequirementItem[]
-    onRowClick?: (requirement: RequirementItem) => void
+interface PDFListProps {
+    data: PDFItem[]
+    onRowClick?: (pdf: PDFItem) => void
     onGoBack?: () => void
+    onDownload?: (pdf: PDFItem) => void
+    onDelete?: (pdf: PDFItem) => void
 }
 
-export const columns: ColumnDef<RequirementItem>[] = [
+export const columns: ColumnDef<PDFItem>[] = [
     {
         accessorKey: "id",
         header: "ID",
         cell: ({ row }) => <div className="capitalize">{row.getValue("id")}</div>,
     },
     {
-        accessorKey: "description",
+        accessorKey: "filename",
         header: ({ column }) => {
             return (
                 <Button
                     variant="ghost"
                     onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
                 >
-                    Description
+                    Filename
                     <ArrowUpDown />
                 </Button>
             )
         },
-        cell: ({ row }) => <div className="lowercase">{row.getValue("description")}</div>,
-    },
+        cell: ({ row }) => <div>{row.getValue("filename")}</div>,
+    }
 ]
 
-export default function RequirementList({ data, onRowClick, onGoBack }: RequirementListProps) {
+export default function PDFList({ data, onRowClick, onGoBack, onDownload, onDelete }: PDFListProps) {
     const [sorting, setSorting] = React.useState<SortingState>([])
     const [columnFilters, setColumnFilters] = React.useState<ColumnFiltersState>([])
     const [columnVisibility, setColumnVisibility] = React.useState<VisibilityState>({})
-    const [selectedRowId, setSelectedRowId] = React.useState<string | null>(
+    const [selectedRowId, setSelectedRowId] = React.useState<number | null>(
         data.length > 0 ? data[0].id : null
     )
 
@@ -109,6 +111,7 @@ export default function RequirementList({ data, onRowClick, onGoBack }: Requirem
                                         </TableHead>
                                     )
                                 })}
+                                <TableHead>Actions</TableHead>
                             </TableRow>
                         ))}
                     </TableHeader>
@@ -134,15 +137,39 @@ export default function RequirementList({ data, onRowClick, onGoBack }: Requirem
                                             )}
                                         </TableCell>
                                     ))}
+                                    <TableCell>
+                                        <div className="flex gap-2">
+                                            <Button
+                                                variant="ghost"
+                                                size="sm"
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    onDownload?.(row.original);
+                                                }}
+                                            >
+                                                <Download className="h-4 w-4" />
+                                            </Button>
+                                            <Button
+                                                variant="ghost"
+                                                size="sm"
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    onDelete?.(row.original);
+                                                }}
+                                            >
+                                                <Trash2 className="h-4 w-4" />
+                                            </Button>
+                                        </div>
+                                    </TableCell>
                                 </TableRow>
                             ))
                         ) : (
                             <TableRow>
                                 <TableCell
-                                    colSpan={columns.length}
+                                    colSpan={columns.length + 1}
                                     className="h-24 text-center"
                                 >
-                                    No requirements found.
+                                    No PDFs found.
                                 </TableCell>
                             </TableRow>
                         )}

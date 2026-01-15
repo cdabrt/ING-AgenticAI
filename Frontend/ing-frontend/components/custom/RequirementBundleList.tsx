@@ -30,6 +30,7 @@ import { RequirementBundle } from "@/lib/types"
 interface RequirementBundleListProps {
     data: RequirementBundle[]
     onRowClick?: (bundle: RequirementBundle) => void
+    setSelectedList: (index: number) => void
 }
 
 export const columns: ColumnDef<RequirementBundle>[] = [
@@ -88,13 +89,14 @@ export const columns: ColumnDef<RequirementBundle>[] = [
     },
 ]
 
-export default function RequirementBundleList({ data, onRowClick }: RequirementBundleListProps) {
+export default function RequirementBundleList({ data, onRowClick, setSelectedList }: RequirementBundleListProps) {
     const [sorting, setSorting] = React.useState<SortingState>([])
     const [columnFilters, setColumnFilters] = React.useState<ColumnFiltersState>([])
     const [columnVisibility, setColumnVisibility] = React.useState<VisibilityState>({})
     const [selectedRowId, setSelectedRowId] = React.useState<number | null>(
         data.length > 0 ? data[0].id : null
     )
+    const [expandedRowId, setExpandedRowId] = React.useState<number | null>(null)
 
     const table = useReactTable({
         data,
@@ -138,26 +140,64 @@ export default function RequirementBundleList({ data, onRowClick }: RequirementB
                     <TableBody>
                         {table.getRowModel().rows?.length ? (
                             table.getRowModel().rows.map((row) => (
-                                <TableRow
-                                    key={row.id}
-                                    onClick={() => {
-                                        setSelectedRowId(row.original.id)
-                                        onRowClick?.(row.original)
-                                    }}
-                                    className={`cursor-pointer ${selectedRowId === row.original.id
-                                        ? "bg-zinc-200 hover:bg-zinc-300"
-                                        : ""
-                                        }`}
-                                >
-                                    {row.getVisibleCells().map((cell) => (
-                                        <TableCell key={cell.id}>
-                                            {flexRender(
-                                                cell.column.columnDef.cell,
-                                                cell.getContext()
-                                            )}
+                                <React.Fragment key={row.id}>
+                                    <TableRow
+                                        onClick={() => {
+                                            setSelectedRowId(row.original.id)
+                                            setExpandedRowId(
+                                                expandedRowId === row.original.id ? null : row.original.id
+                                            )
+                                            onRowClick?.(row.original)
+                                        }}
+                                        className={`cursor-pointer ${selectedRowId === row.original.id
+                                            ? "bg-zinc-200 hover:bg-zinc-300"
+                                            : ""
+                                            }`}
+                                    >
+                                        {row.getVisibleCells().map((cell) => (
+                                            <TableCell key={cell.id}>
+                                                {flexRender(
+                                                    cell.column.columnDef.cell,
+                                                    cell.getContext()
+                                                )}
+                                            </TableCell>
+                                        ))}
+                                    </TableRow>
+                                    <TableRow className="bg-zinc-50 border-t-0">
+                                        <TableCell colSpan={columns.length} className="p-0">
+                                            <div 
+                                                className={`overflow-hidden transition-all duration-300 ease-in-out ${
+                                                    expandedRowId === row.original.id 
+                                                        ? "max-h-40 opacity-100" 
+                                                        : "max-h-0 opacity-0"
+                                                }`}
+                                            >
+                                                <div className="flex flex-col gap-2 p-3 pl-8">    
+                                                    {
+                                                        row.original.business_requirements?.length > 0 && 
+                                                        <Button
+                                                            variant="outline"
+                                                            className="justify-start text-sm cursor-pointer"
+                                                            onClick={() => setSelectedList(1)}
+                                                        >
+                                                            Business Requirements
+                                                        </Button>
+                                                    }
+                                                    {
+                                                    row.original.data_requirements?.length > 0 && 
+                                                        <Button
+                                                            variant="outline"
+                                                            className="justify-start text-sm cursor-pointer"
+                                                            onClick={() => setSelectedList(2)}
+                                                        >
+                                                            Data Requirements
+                                                        </Button>
+                                                    }
+                                                </div>
+                                            </div>
                                         </TableCell>
-                                    ))}
-                                </TableRow>
+                                    </TableRow>
+                                </React.Fragment>
                             ))
                         ) : (
                             <TableRow>

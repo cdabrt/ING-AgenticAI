@@ -34,6 +34,13 @@ class PostgreClient:
         if filters:
             query = query.filter_by(**filters)
         return query.all()
+    
+    def get_all_deferred(self, model, *defer_options, **filters):
+        """Get all items with deferred loading for specific columns"""
+        query = self.db.query(model).options(*defer_options)
+        if filters:
+            query = query.filter_by(**filters)
+        return query.all()
 
     def flush(self):
         self.db.flush()
