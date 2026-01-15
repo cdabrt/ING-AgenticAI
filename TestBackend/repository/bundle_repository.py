@@ -1,5 +1,5 @@
 from typing import List, Optional
-from TestBackend.database.database_client import DatabaseClient
+from database.database_client import DatabaseClient
 from database.models.models import RequirementBundle as RequirementBundleDatabaseModel 
 from AgenticAI.agentic.models import RequirementBundle as RequirementBundleLocalModel
 from database.models.adapters.requirement_bundle_adapter import adapt_to_db_model, adapt_to_model

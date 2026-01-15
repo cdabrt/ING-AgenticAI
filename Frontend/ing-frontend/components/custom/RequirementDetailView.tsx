@@ -7,8 +7,9 @@ import { Button } from "../ui/button";
 import { Textarea } from "../ui/textarea";
 import { useState } from "react";
 import axios from "axios";
+import { routes } from "@/config/routes";
 
-function RequirementDetailView({ requirement }: { requirement: RequirementItem | null }) {
+function RequirementDetailView({ requirement, onSave }: { requirement: RequirementItem | null, onSave?: () => void }) {
 
     const [isEditMode, setIsEditMode] = useState<boolean>(false);
     const [description, setDescription] = useState<string>("");
@@ -38,11 +39,16 @@ function RequirementDetailView({ requirement }: { requirement: RequirementItem |
             let tmp_requirement = { ...requirement, description, rationale };
 
                setError(null);
-                axios.post('/api/requirement', tmp_requirement).catch((error) => {
+                axios.put(routes.save_requirement, tmp_requirement).catch((error) => {
                     setError(error.message);
                 }).then((response) => {
                     if (!response || !response.data) {
                         setError("No data received!");
+                    } else {
+                        // Call onSave callback to notify parent of successful save
+                        if (onSave) {
+                            onSave();
+                        }
                     }
                 });
         } else {

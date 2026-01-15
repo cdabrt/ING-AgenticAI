@@ -1,5 +1,5 @@
 from fastapi import APIRouter
-from fastapi import Depends, FastAPI, UploadFile, File, HTTPException
+from fastapi import Depends, UploadFile, File, HTTPException
 from fastapi.responses import Response
 from repository.pdf_repository import PDFRepository
 
@@ -8,7 +8,7 @@ router = APIRouter(prefix="/pdfs")
 # GET
 # -------------------------------------------
 
-@router.get("/")
+@router.get("")
 def get_all_pdfs(pdf_repository: PDFRepository = Depends(PDFRepository)):
     """Get all uploaded PDF documents (metadata only, not the binary data)"""
     pdfs = pdf_repository.get_all_pdf_documents()
@@ -20,19 +20,6 @@ def get_all_pdfs(pdf_repository: PDFRepository = Depends(PDFRepository)):
         }
         for pdf in pdfs
     ]
-
-@router.get("/{pdf_id}")
-def get_pdf(pdf_id: int, pdf_repository: PDFRepository = Depends(PDFRepository)):
-    """Get a specific PDF document by ID"""
-    pdf = pdf_repository.get_pdf_document(pdf_id)
-    if not pdf:
-        raise HTTPException(status_code=404, detail="PDF not found")
-    
-    return {
-        "id": pdf.id,
-        "filename": pdf.filename,
-        "size": len(pdf.pdf_data)
-    }
 
 @router.get("/{pdf_id}/download")
 def download_pdf(pdf_id: int, pdf_repository: PDFRepository = Depends(PDFRepository)):

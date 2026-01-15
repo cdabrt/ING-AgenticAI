@@ -4,6 +4,7 @@ export interface RequirementItem {
     rationale: string;
     document_sources: string[];
     online_sources: string[];
+    type: "BUSINESS" | "DATA";
 }
 
 export interface RequirementBundle {

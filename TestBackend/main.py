@@ -1,10 +1,9 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
+from router import bundles, pdfs, requirements
 from database.models.models import Base
 from database.engine.psycopg_connection import create_engine
-
-from router import pdf, bundle, requirement
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -20,6 +19,6 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
-app.include_router(pdf.router, prefix="/api")
-app.include_router(bundle.router, prefix="/api")
-app.include_router(requirement.router, prefix="/api")
+app.include_router(pdfs.router, prefix="/api")
+app.include_router(bundles.router, prefix="/api")
+app.include_router(requirements.router, prefix="/api")

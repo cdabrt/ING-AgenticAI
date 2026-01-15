@@ -40,5 +40,6 @@ def requirement_item_to_contract(domain: ModelRequirementItem) -> ContractRequir
         description=domain.description,
         rationale=domain.rationale,
         document_sources=domain.document_sources,
-        online_sources=domain.online_sources
+        online_sources=domain.online_sources,
+        type=domain.type
     )

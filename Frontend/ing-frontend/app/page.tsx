@@ -16,6 +16,7 @@ import RequirementList from "@/components/custom/RequirementList";
 import RequirementBundleList from "@/components/custom/RequirementBundleList";
 import BundleDetailView from "@/components/custom/BundleDetailView";
 import FileUploadDialog from "@/components/custom/FileUploadDialog";
+import { routes } from "@/config/routes";
 
 // Import PDFViewer dynamically to avoid SSR issues
 const PDFViewer = dynamic(() => import("@/components/custom/PDFViewer").then(mod => ({ default: mod.PDFViewer })), {
@@ -130,7 +131,7 @@ export default function Home() {
 
   function getRequirementBundles(): Promise<void> {
     setError(null);
-    return axios.get('/api/bundles').catch((error) => {
+    return axios.get(routes.get_all_bundles).catch((error) => {
       setError(error.message);
     }).then((response) => {
       if (response && response.data) {
@@ -149,7 +150,7 @@ export default function Home() {
 
   function generateRequirementBundle(): Promise<void> {
     setError(null);
-    return axios.post('/api/pipeline').catch((error) => {
+    return axios.post(routes.generate_bundle).catch((error) => {
       setError(error.message);
     }).then(async () => {
       await getRequirementBundles();
@@ -159,7 +160,7 @@ export default function Home() {
   async function openPdf(pdfId: number): Promise<void> {
     setError(null);
     try {
-      const response = await axios.get(`/api/pdfs/${pdfId}/download`, {
+      const response = await axios.get(routes.download_pdf(pdfId), {
         responseType: 'arraybuffer'
       });
 
@@ -206,7 +207,7 @@ export default function Home() {
         <ResizablePanelGroup direction={"horizontal"}>
           <ResizablePanel defaultSize={1 / 3} className="min-w-1/4">
             <div className="h-full w-full bg-white border-t border-r overflow-hidden">
-              {selectedList !== 0 && <RequirementDetailView requirement={selected} />}
+              {selectedList !== 0 && <RequirementDetailView requirement={selected} onSave={getRequirementBundles} />}
               {selectedList === 0 && <BundleDetailView bundle={selectedBundle} />}
             </div>
           </ResizablePanel>

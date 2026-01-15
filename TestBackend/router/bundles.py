@@ -1,16 +1,15 @@
 from typing import List
 from fastapi import APIRouter, Depends
 from AgenticAI.agentic.models import RequirementBundle, RequirementItem
-from TestBackend.repository.bundle_repository import BundleRepository
+from repository.bundle_repository import BundleRepository
 
-router = APIRouter(prefix="/bundle")
+router = APIRouter(prefix="/bundles")
 
 # GET
 # -------------------------------------------
 
-@router.get("/", tags=["Requirement Bundle"], response_model=List[RequirementBundle])
+@router.get("", tags=["Requirement Bundle"], response_model=List[RequirementBundle])
 def get_all_requirement_bundles(client: BundleRepository = Depends(BundleRepository)) -> List[RequirementBundle]:
-
     bundles = client.get_requirement_bundles()
     return bundles
 
@@ -26,6 +25,7 @@ def generate_bundle(client: BundleRepository = Depends(BundleRepository)) -> Req
         rationale="To ensure data security and compliance with regulations.",
         document_sources=["Document A - Section 3.2", "Document B - Page 5"],
         online_sources=["https://example.com/security-guidelines"],
+        type="BUSINESS"
     )
     req2 = RequirementItem(
         id="REQ-002",
@@ -33,6 +33,7 @@ def generate_bundle(client: BundleRepository = Depends(BundleRepository)) -> Req
         rationale="To enhance account security and prevent unauthorized access.",
         document_sources=["Document C - Section 4.1"],
         online_sources=["https://example.com/authentication-best-practices"],
+        type="BUSINESS"
     )
     
     data_req1 = RequirementItem(
@@ -41,6 +42,7 @@ def generate_bundle(client: BundleRepository = Depends(BundleRepository)) -> Req
         rationale="To maintain data integrity and support complex queries.",
         document_sources=["Document D - Section 2.1"],
         online_sources=["https://example.com/database-design"],
+        type="DATA"
     )
 
     bundle = RequirementBundle(
@@ -52,7 +54,9 @@ def generate_bundle(client: BundleRepository = Depends(BundleRepository)) -> Req
             "All users have access to email for MFA verification",
             "The system will be deployed on cloud infrastructure with encryption support",
             "Compliance requirements follow GDPR and SOC2 standards"
-        ]
+        ],
+        type="DATA"
+
     )
 
     saved_bundle = client.save_requirement_bundle(bundle)

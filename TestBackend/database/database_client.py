@@ -1,4 +1,4 @@
-from TestBackend.repository.postgre_client import PostgreClient, get_db
+from database.postgre_client import PostgreClient, get_db
 from fastapi import Depends
 
 class DatabaseClient:

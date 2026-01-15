@@ -9,6 +9,8 @@ class RequirementItem(BaseModel):
     rationale: str
     document_sources: List[str]
     online_sources: List[str]
+    type: str
+    # TODO Add this to the old requirement item
 
 
 class RequirementBundle(BaseModel):
@@ -18,13 +20,13 @@ class RequirementBundle(BaseModel):
     data_requirements: List[RequirementItem]
     assumptions: List[str]
 
+class Source(BaseModel):
+    id: int
+    source_type: str
+    reference: str
+
 class PDFDocument(BaseModel):
     id: int
     filename: str
     pdf_data: bytes
     sources: List[Source]
-
-class Source(BaseModel):
-    id: int
-    source_type: str
-    reference: str

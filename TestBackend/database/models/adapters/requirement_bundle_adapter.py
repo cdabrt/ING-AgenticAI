@@ -23,11 +23,11 @@ def adapt_to_db_model(model_bundle: ModelRequirementBundle) -> ContractRequireme
     
     # Add business requirements
     for req in model_bundle.business_requirements:
-        contract_bundle.requirements.append(_adapt_item_to_db_model(req, RequirementType.BUSINESS))
+        contract_bundle.requirements.append(_adapt_item_to_db_model(req))
     
     # Add data requirements
     for req in model_bundle.data_requirements:
-        contract_bundle.requirements.append(_adapt_item_to_db_model(req, RequirementType.DATA))
+        contract_bundle.requirements.append(_adapt_item_to_db_model(req))
     
     # Convert assumptions
     contract_bundle.assumptions = []
