@@ -1,8 +1,9 @@
 import json
 import logging
-from datetime import datetime
+import math
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, Iterator, List
+from typing import Callable, Dict, Iterator, List, Optional, Tuple
 
 from AgenticAI.Chunker.Chunk import Chunk
 from AgenticAI.Chunker.Chunker import Chunker
@@ -37,6 +38,9 @@ def vector_store_exists(persist_dir: str) -> bool:
     )
 
 
+ProgressCallback = Callable[[float, Optional[str]], None]
+
+
 def ingest_documents(
     data_dir: str,
     persist_dir: str,
@@ -44,6 +48,7 @@ def ingest_documents(
     chunk_overlap: int = 150,
     table_row_overlap: int = 1,
     embedding_batch_size: int = 64,
+    progress_callback: Optional[ProgressCallback] = None,
 ) -> Dict:
     data_path = Path(data_dir)
     if not data_path.exists():
@@ -64,15 +69,26 @@ def ingest_documents(
 
     logger.info("Processing %s PDF files from %s", len(pdf_files), data_dir)
 
-    for pdf_file in pdf_files:
+    total_files = len(pdf_files)
+
+    def notify(progress: float, message: Optional[str] = None) -> None:
+        if progress_callback:
+            progress_callback(progress, message)
+
+    for index, pdf_file in enumerate(pdf_files, start=1):
+        base_progress = (index - 1) / total_files
+        file_weight = 1 / total_files
+        notify(base_progress, f"Parsing {pdf_file.name} ({index}/{total_files})")
         logger.info("Parsing %s", pdf_file.name)
         documents = PDFParser.load_structured_pdf(pdf_file)
         total_element_count += len(documents)
 
         if not documents:
             logger.warning("Skipping %s — parser returned no elements", pdf_file.name)
+            notify(base_progress + file_weight, f"Skipped {pdf_file.name} (no elements)")
             continue
 
+        notify(base_progress + file_weight * 0.2, f"Chunking {pdf_file.name}")
         chunks: List[Chunk] = Chunker.chunk_headings_with_paragraphs(
             documents=documents,
             chunk_size=chunk_size,
@@ -82,12 +98,19 @@ def ingest_documents(
 
         if not chunks:
             logger.warning("Skipping %s — chunker returned no chunks", pdf_file.name)
+            notify(base_progress + file_weight, f"Skipped {pdf_file.name} (no chunks)")
             continue
 
         total_chunk_count += len(chunks)
         logger.info("Embedding %s chunks from %s", len(chunks), pdf_file.name)
+        total_batches = max(1, math.ceil(len(chunks) / embedding_batch_size))
 
-        for batch in _batched_chunks(chunks, embedding_batch_size):
+        for batch_index, batch in enumerate(_batched_chunks(chunks, embedding_batch_size), start=1):
+            embed_fraction = batch_index / total_batches
+            notify(
+                base_progress + file_weight * (0.3 + 0.7 * embed_fraction),
+                f"Embedding {pdf_file.name} ({batch_index}/{total_batches})",
+            )
             dimension, chunk_vector_embed_dict = vector_embedder.embed_vectors_in_chunks(batch)
             if vector_store is None:
                 vector_store = FAISSStore(dimensions=dimension, use_cosine_similarity=True)
@@ -115,7 +138,7 @@ def ingest_documents(
         "dimension": embedding_dimension,
         "chunk_count": total_chunk_count,
         "parsed_elements": total_element_count,
-        "generated_at": datetime.utcnow().isoformat() + "Z",
+        "generated_at": datetime.now(timezone.utc).isoformat(),
         "data_dir": str(data_path.resolve()),
     }
     _write_store_config(target_dir, store_config)
