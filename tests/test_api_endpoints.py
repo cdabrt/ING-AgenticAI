@@ -32,7 +32,7 @@ def _make_pdf_bytes(text: str = "Hello world") -> bytes:
     pdf.add_page()
     pdf.set_font("Helvetica", size=12)
     pdf.cell(0, 10, text=text, new_x="LMARGIN", new_y="NEXT")
-    raw = pdf.output(dest="S")
+    raw = pdf.output()
     return bytes(raw)
 
 
@@ -105,7 +105,7 @@ def test_bundles_empty_when_no_output(app_client):
 def test_pipeline_endpoint_writes_output(app_client, monkeypatch):
     client, app_module, data_dir, output_path = app_client
 
-    async def fake_run_pipeline(args):
+    async def fake_run_pipeline(args, progress_callback=None):
         output_path.parent.mkdir(parents=True, exist_ok=True)
         with output_path.open("w", encoding="utf-8") as handle:
             json.dump(

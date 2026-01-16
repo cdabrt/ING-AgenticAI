@@ -120,7 +120,11 @@ async def _run_ddg_search(
         with DDGS() as ddgs:
             return list(ddgs.text(query, max_results=max_results))
 
-    results = await asyncio.to_thread(_search)
+    try:
+        results = await asyncio.to_thread(_search)
+    except Exception as exc:  # pragma: no cover - network variability
+        logger.warning("Web search failed for query '%s': %s", query, exc)
+        return []
     if not results:
         return []
 

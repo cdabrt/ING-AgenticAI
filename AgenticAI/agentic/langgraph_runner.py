@@ -1,12 +1,17 @@
 from __future__ import annotations
 
+import asyncio
 import json
+import os
+import random
+import re
+import time
 from typing import Any, Dict, List, Tuple, TypedDict, cast
 
 from langchain_core.exceptions import OutputParserException
+from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.output_parsers import PydanticOutputParser
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_google_genai import ChatGoogleGenerativeAI
 from langgraph.graph import END, StateGraph
 
 from AgenticAI.agentic.models import (
@@ -36,21 +41,132 @@ class AgenticState(TypedDict, total=False):
     requirements: Dict
 
 
+class AsyncRateLimiter:
+    def __init__(self, rpm: float):
+        self.min_interval = 60.0 / rpm if rpm and rpm > 0 else 0.0
+        self._lock = asyncio.Lock()
+        self._last_call = 0.0
+
+    async def wait(self) -> None:
+        if self.min_interval <= 0:
+            return
+        async with self._lock:
+            now = time.monotonic()
+            elapsed = now - self._last_call
+            delay = self.min_interval - elapsed
+            if delay > 0:
+                await asyncio.sleep(delay)
+            self._last_call = time.monotonic()
+
+
 class AgenticGraphRunner:
     def __init__(
         self,
-        query_model: ChatGoogleGenerativeAI,
-        requirements_model: ChatGoogleGenerativeAI,
+        query_model: BaseChatModel,
+        requirements_model: BaseChatModel,
         mcp_client: MCPToolClient,
         retrieval_top_k: int = 8,
         decision_logger: DecisionLogger | None = None,
+        throttle_enabled: bool = True,
     ):
         self.query_model = query_model
         self.requirements_model = requirements_model
         self.mcp_client = mcp_client
         self.retrieval_top_k = retrieval_top_k
         self.decision_logger = decision_logger
+        self.throttle_enabled = throttle_enabled
+        self.query_rate_limiter = AsyncRateLimiter(self._get_query_rpm())
+        self.requirements_rate_limiter = AsyncRateLimiter(self._get_requirements_rpm())
         self.graph = self._build_graph()
+
+    @staticmethod
+    def _parse_rpm(value: str | None, default: float) -> float:
+        if not value:
+            return default
+        try:
+            rpm = float(value)
+        except ValueError:
+            return default
+        return rpm if rpm > 0 else 0.0
+
+    def _get_query_rpm(self) -> float:
+        if not self.throttle_enabled:
+            return 0.0
+        default_rpm = self._parse_rpm(
+            os.getenv("GEMINI_RPM_LIMIT") or os.getenv("GEMINI_REQUESTS_PER_MINUTE"),
+            8.0,
+        )
+        return self._parse_rpm(os.getenv("QUERY_MODEL_RPM"), default_rpm)
+
+    def _get_requirements_rpm(self) -> float:
+        if not self.throttle_enabled:
+            return 0.0
+        default_rpm = self._parse_rpm(
+            os.getenv("GEMINI_RPM_LIMIT") or os.getenv("GEMINI_REQUESTS_PER_MINUTE"),
+            8.0,
+        )
+        return self._parse_rpm(os.getenv("REQUIREMENTS_MODEL_RPM"), default_rpm)
+
+    @staticmethod
+    def _parse_retry_delay(message: str) -> float | None:
+        match = re.search(r"retryDelay['\"]?: ['\"]?([0-9.]+)s", message)
+        if match:
+            return float(match.group(1))
+        match = re.search(r"retry in ([0-9.]+)s", message)
+        if match:
+            return float(match.group(1))
+        return None
+
+    @staticmethod
+    def _is_daily_quota(message: str) -> bool:
+        lowered = message.lower()
+        return "perday" in lowered or "per day" in lowered or "requestsperday" in lowered
+
+    async def _ainvoke_with_retry(
+        self,
+        *,
+        chain,
+        payload: Dict[str, Any],
+        limiter: AsyncRateLimiter,
+        model_label: str,
+        max_retries: int,
+    ):
+        attempt = 0
+        while True:
+            await limiter.wait()
+            try:
+                return await chain.ainvoke(payload)
+            except Exception as exc:  # noqa: BLE001 - surface quota errors
+                message = str(exc)
+                if "RESOURCE_EXHAUSTED" not in message and "429" not in message:
+                    raise
+
+                if self._is_daily_quota(message):
+                    raise RuntimeError(
+                        f"Quota exceeded for {model_label}. Daily limit reached; try again later or use another key."
+                    ) from exc
+
+                retry_delay = self._parse_retry_delay(message)
+                if retry_delay is None:
+                    retry_delay = min(60.0, 2.0 ** min(attempt, 5))
+                retry_delay += random.uniform(0.2, 0.8)
+
+                await self._log_event(
+                    "llm_backoff",
+                    {
+                        "model": model_label,
+                        "attempt": attempt + 1,
+                        "retry_delay_seconds": round(retry_delay, 2),
+                        "error": message,
+                    },
+                )
+
+                attempt += 1
+                if attempt > max_retries:
+                    raise RuntimeError(
+                        f"Quota exceeded for {model_label}. Retry limit reached; wait before trying again."
+                    ) from exc
+                await asyncio.sleep(retry_delay)
 
     def _build_graph(self):
         workflow = StateGraph(AgenticState)
@@ -90,13 +206,17 @@ class AgenticGraphRunner:
         )
         chain = prompt | self.query_model | parser
         headings_text = " | ".join(state.get("doc_headings", []))
-        result: QuerySpecification = await chain.ainvoke(
-            {
+        result: QuerySpecification = await self._ainvoke_with_retry(
+            chain=chain,
+            payload={
                 "doc_source": state.get("doc_source", "unknown document"),
                 "headings": headings_text,
                 "doc_text": state.get("doc_text", ""),
                 "format_instructions": format_instructions,
-            }
+            },
+            limiter=self.query_rate_limiter,
+            model_label="query_model",
+            max_retries=int(os.getenv("GEMINI_MAX_RETRIES", "3")),
         )
         await self._log_event(
             "query_agent",
@@ -180,14 +300,18 @@ class AgenticGraphRunner:
             ]
         )
         chain = prompt | self.query_model | parser
-        assessment: ContextAssessment = await chain.ainvoke(
-            {
+        assessment: ContextAssessment = await self._ainvoke_with_retry(
+            chain=chain,
+            payload={
                 "summary": state.get("document_summary", ""),
                 "doc_type": state.get("document_type", "unknown"),
                 "ctx_count": len(state.get("retrieval_results", [])),
                 "chunks": chunk_preview,
                 "format_instructions": format_instructions,
-            }
+            },
+            limiter=self.query_rate_limiter,
+            model_label="query_model",
+            max_retries=int(os.getenv("GEMINI_MAX_RETRIES", "3")),
         )
         await self._log_event(
             "context_assessment",
@@ -329,14 +453,18 @@ class AgenticGraphRunner:
         chain = prompt | self.query_model | parser
         summary_snippet = (document_summary or "")[:80]
         try:
-            response: WebSelectionResponse = await chain.ainvoke(
-                {
+            response: WebSelectionResponse = await self._ainvoke_with_retry(
+                chain=chain,
+                payload={
                     "summary": document_summary,
                     "doc_type": document_type,
                     "query": query,
                     "candidates": json.dumps([cand.model_dump() for cand in candidates]),
                     "format_instructions": format_instructions,
-                }
+                },
+                limiter=self.query_rate_limiter,
+                model_label="query_model",
+                max_retries=int(os.getenv("GEMINI_MAX_RETRIES", "3")),
             )
             return response.selections or []
         except OutputParserException as exc:
@@ -395,8 +523,9 @@ class AgenticGraphRunner:
             ]
         )
         chain = prompt | self.query_model | parser
-        decision: WebContentDecision = await chain.ainvoke(
-            {
+        decision: WebContentDecision = await self._ainvoke_with_retry(
+            chain=chain,
+            payload={
                 "summary": document_summary,
                 "doc_type": document_type,
                 "query": query,
@@ -405,7 +534,10 @@ class AgenticGraphRunner:
                 "snippet": candidate.snippet or "",
                 "content": content,
                 "format_instructions": format_instructions,
-            }
+            },
+            limiter=self.query_rate_limiter,
+            model_label="query_model",
+            max_retries=int(os.getenv("GEMINI_MAX_RETRIES", "3")),
         )
         return decision
 
@@ -436,15 +568,19 @@ class AgenticGraphRunner:
         chunk_text = json.dumps(state.get("retrieval_results", []))
         web_text = json.dumps(state.get("web_context", []))
 
-        bundle: RequirementBundle = await chain.ainvoke(
-            {
+        bundle: RequirementBundle = await self._ainvoke_with_retry(
+            chain=chain,
+            payload={
                 "doc": state.get("doc_source"),
                 "doc_type": state.get("document_type", "unknown"),
                 "summary": state.get("document_summary", ""),
                 "chunks": chunk_text,
                 "web": web_text,
                 "format_instructions": format_instructions,
-            }
+            },
+            limiter=self.requirements_rate_limiter,
+            model_label="requirements_model",
+            max_retries=int(os.getenv("GEMINI_MAX_RETRIES", "3")),
         )
         await self._log_event(
             "requirements",
@@ -494,8 +630,9 @@ class AgenticGraphRunner:
         web_text = json.dumps(state.get("web_context", []))
         existing_text = json.dumps(prior_bundle.model_dump())
 
-        refined_bundle: RequirementBundle = await chain.ainvoke(
-            {
+        refined_bundle: RequirementBundle = await self._ainvoke_with_retry(
+            chain=chain,
+            payload={
                 "doc": state.get("doc_source"),
                 "doc_type": state.get("document_type", "unknown"),
                 "summary": state.get("document_summary", ""),
@@ -503,7 +640,10 @@ class AgenticGraphRunner:
                 "chunks": chunk_text,
                 "web": web_text,
                 "format_instructions": format_instructions,
-            }
+            },
+            limiter=self.requirements_rate_limiter,
+            model_label="requirements_model",
+            max_retries=int(os.getenv("GEMINI_MAX_RETRIES", "3")),
         )
         await self._log_event(
             "requirements_refinement",

@@ -16,6 +16,7 @@ setup(
         "langchain",
         "langgraph",
         "langchain-google-genai",
+        "langchain-openai",
         "ddgs",
         "modelcontextprotocol",
         "python-dotenv",
