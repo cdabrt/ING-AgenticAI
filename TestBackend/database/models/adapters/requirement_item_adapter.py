@@ -1,26 +1,24 @@
 from ..models import (
     RequirementItem as ContractRequirementItem,
     Source as ContractSource,
-    RequirementType,
     SourceType
 )
 from AgenticAI.agentic.models import RequirementItem as ModelRequirementItem
 
 
-def adapt_to_contract(model_item: ModelRequirementItem, item_type: RequirementType) -> ContractRequirementItem:
+def adapt_to_db_model(model_item: ModelRequirementItem) -> ContractRequirementItem:
     """
     Adapts a ModelRequirementItem (Pydantic) to ContractRequirementItem (SQLAlchemy)
     for database persistence.
     
     Args:
         model_item: The Pydantic model item to convert
-        item_type: RequirementType.BUSINESS or RequirementType.DATA to specify the requirement type
     """
     contract_item = ContractRequirementItem()
     contract_item.req_id = model_item.id
     contract_item.description = model_item.description
     contract_item.rationale = model_item.rationale
-    contract_item.type = item_type
+    contract_item.type = model_item.type
     
     # Convert sources
     contract_item.sources = []
@@ -60,5 +58,6 @@ def adapt_to_model(contract_item: ContractRequirementItem) -> ModelRequirementIt
         description=contract_item.description,
         rationale=contract_item.rationale,
         document_sources=document_sources,
-        online_sources=online_sources
+        online_sources=online_sources,
+        type=contract_item.type
     )

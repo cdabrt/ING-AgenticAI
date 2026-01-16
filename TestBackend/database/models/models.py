@@ -1,3 +1,4 @@
+# Database models using SQLAlchemy ORM
 from __future__ import annotations
 
 import enum

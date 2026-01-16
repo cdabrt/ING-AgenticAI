@@ -6,6 +6,7 @@ import { Upload, X, FileText, CheckCircle2, AlertCircle } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import axios from "axios";
+import { routes } from "@/config/routes";
 
 interface FileUploadItem {
     file: File;
@@ -75,7 +76,7 @@ export default function FileUploadDialog({ onUploadComplete, onClose }: FileUplo
                     return updated;
                 });
 
-                await axios.post("/api/upload", formData, {
+                await axios.post(routes.upload_pdf, formData, {
                     headers: {
                         "Content-Type": "multipart/form-data",
                     },

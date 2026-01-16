@@ -4,6 +4,7 @@ export interface RequirementItem {
     rationale: string;
     document_sources: string[];
     online_sources: string[];
+    type: "BUSINESS" | "DATA";
 }
 
 export interface RequirementBundle {
@@ -13,4 +14,11 @@ export interface RequirementBundle {
     business_requirements: RequirementItem[];
     data_requirements: RequirementItem[];
     assumptions: string[];
+}
+
+export interface PDFItem {
+    id: number;
+    filename: string;
+    upload_date: string;
+    file_size?: number;
 }

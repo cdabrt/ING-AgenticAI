@@ -1,10 +1,21 @@
-import { FileText, Search } from "lucide-react";
+import { FileText, Search, Edit, Save } from "lucide-react";
 import { Card, CardContent } from "../ui/card";
 import { Separator } from "../ui/separator";
 import { RequirementItem } from "@/lib/types";
 import { ScrollArea } from "../ui/scroll-area";
+import { Button } from "../ui/button";
+import { Textarea } from "../ui/textarea";
+import { useState } from "react";
+import axios from "axios";
+import { routes } from "@/config/routes";
 
-function RequirementDetailView({ requirement }: { requirement: RequirementItem | null }) {
+function RequirementDetailView({ requirement, onSave }: { requirement: RequirementItem | null, onSave?: () => void }) {
+
+    const [isEditMode, setIsEditMode] = useState<boolean>(false);
+    const [description, setDescription] = useState<string>("");
+    const [rationale, setRationale] = useState<string>("");
+    const [error, setError] = useState<string | null>(null);
+    
     if (!requirement) {
         return (
             <div className="h-full w-full flex items-center justify-center p-8">
@@ -15,14 +26,63 @@ function RequirementDetailView({ requirement }: { requirement: RequirementItem |
         );
     }
 
+    // Initialize editable fields when requirement changes
+    if (description === "" && requirement.description) {
+        setDescription(requirement.description);
+    }
+    if (rationale === "" && requirement.rationale) {
+        setRationale(requirement.rationale);
+    }
+
+    const handleToggleEditMode = () => {
+        if (isEditMode) {
+            let tmp_requirement = { ...requirement, description, rationale };
+
+               setError(null);
+                axios.put(routes.save_requirement, tmp_requirement).catch((error) => {
+                    setError(error.message);
+                }).then((response) => {
+                    if (!response || !response.data) {
+                        setError("No data received!");
+                    } else {
+                        // Call onSave callback to notify parent of successful save
+                        if (onSave) {
+                            onSave();
+                        }
+                    }
+                });
+        } else {
+            setDescription(requirement.description);
+            setRationale(requirement.rationale);
+        }
+        setIsEditMode(!isEditMode);
+    };
+
     return (
         <ScrollArea className="h-full w-full overflow-y-auto">
             <div className="p-6 space-y-6">
-                {/* Header with ID */}
-                <div>
+                {/* Header with ID and Edit Button */}
+                <div className="flex items-center justify-between">
                     <span className="text-xs font-mono text-muted-foreground bg-muted px-2 py-1 rounded">
                         {requirement.id}
                     </span>
+                    <Button
+                        onClick={handleToggleEditMode}
+                        variant={isEditMode ? "default" : "outline"}
+                        size="sm"
+                    >
+                        {isEditMode ? (
+                            <>
+                                <Save className="h-4 w-4 mr-2" />
+                                Save
+                            </>
+                        ) : (
+                            <>
+                                <Edit className="h-4 w-4 mr-2" />
+                                Edit
+                            </>
+                        )}
+                    </Button>
                 </div>
 
                 {/* Description Section */}
@@ -30,9 +90,18 @@ function RequirementDetailView({ requirement }: { requirement: RequirementItem |
                     <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
                         Description
                     </h3>
-                    <p className="text-base leading-relaxed">
-                        {requirement.description}
-                    </p>
+                    {isEditMode ? (
+                        <Textarea
+                            value={description}
+                            onChange={(e) => setDescription(e.target.value)}
+                            className="text-base leading-relaxed"
+                            rows={4}
+                        />
+                    ) : (
+                        <p className="text-base leading-relaxed">
+                            {description}
+                        </p>
+                    )}
                 </div>
 
                 <Separator />
@@ -42,9 +111,18 @@ function RequirementDetailView({ requirement }: { requirement: RequirementItem |
                     <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
                         Rationale
                     </h3>
-                    <p className="text-base leading-relaxed text-muted-foreground">
-                        {requirement.rationale}
-                    </p>
+                    {isEditMode ? (
+                        <Textarea
+                            value={rationale}
+                            onChange={(e) => setRationale(e.target.value)}
+                            className="text-base leading-relaxed text-muted-foreground"
+                            rows={4}
+                        />
+                    ) : (
+                        <p className="text-base leading-relaxed text-muted-foreground">
+                            {rationale}
+                        </p>
+                    )}
                 </div>
 
                 <Separator />
@@ -100,6 +178,7 @@ function RequirementDetailView({ requirement }: { requirement: RequirementItem |
                 )}
             </div>
         </ScrollArea>
+
     );
 }
 

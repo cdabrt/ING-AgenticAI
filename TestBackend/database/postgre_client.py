@@ -1,7 +1,4 @@
 import logging
-from typing import List
-
-from contracts.models import RequirementBundle
 
 try:
      from database.session import SessionLocal
@@ -18,50 +15,32 @@ def get_db():
 class PostgreClient:
     def __init__(self):
         self.db = SessionLocal()
-
-    def get_requirement_bundles(self, bundle_ids: List[int]) -> List[RequirementBundle]:
-        """
-        Retrieve RequirementBundle records by their document IDs.
-        Args:
-            bundle_ids (List[int]): List of document IDs to filter RequirementBundles.
-        Returns:
-            List[RequirementBundle]: List of RequirementBundle records.
-        """
-        if(len(bundle_ids) == 0):
-            return self.db.query(RequirementBundle).all()
-        return self.db.query(RequirementBundle).filter(RequirementBundle.document.in_(bundle_ids)).all()
     
-    def get_requirement_bundle_by_id(self, bundle_id: int) -> RequirementBundle:
-        """
-        Retrieve a single RequirementBundle record by its document ID.
-        Args:
-            bundle_id (int): Document ID of the RequirementBundle to retrieve.
-        Returns:
-            RequirementBundle: The RequirementBundle record.
-        """
-        return self.db.query(RequirementBundle).filter(RequirementBundle.document == bundle_id).first()
+    def delete(self, item):
+        self.db.delete(item)
+        self.db.commit()
 
-    def save_requirement_bundle(self, bundle: RequirementBundle) -> RequirementBundle:
-        """
-        Save a RequirementBundle record to the database.
-        Args:
-            bundle (RequirementBundle): The RequirementBundle record to save.
-        Returns:
-            RequirementBundle: The saved RequirementBundle record.
-        """
-        self.db.add(bundle)
+    def save(self, item):
+        self.db.add(item)
         self.db.commit()
-        self.db.refresh(bundle)
-        return bundle
+        self.db.refresh(item)
+        return item
     
-    def delete_requirement_bundle(self, bundle: RequirementBundle):
-        """
-        Delete a RequirementBundle record from the database.
-        Args:
-            bundle (RequirementBundle): The RequirementBundle record to delete.
-        """
-        self.db.delete(bundle)
-        self.db.commit()
+    def get_first(self, model, **filters):
+        return self.db.query(model).filter_by(**filters).first()
+    
+    def get_all(self, model, **filters):
+        query = self.db.query(model)
+        if filters:
+            query = query.filter_by(**filters)
+        return query.all()
+    
+    def get_all_deferred(self, model, *defer_options, **filters):
+        """Get all items with deferred loading for specific columns"""
+        query = self.db.query(model).options(*defer_options)
+        if filters:
+            query = query.filter_by(**filters)
+        return query.all()
 
     def flush(self):
         self.db.flush()
