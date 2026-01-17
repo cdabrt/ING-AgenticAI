@@ -8,7 +8,7 @@ import os
 import platform
 from importlib import metadata
 from pathlib import Path
-from typing import Callable, List, Optional
+from typing import Callable, Dict, List, Optional
 
 from dotenv import load_dotenv
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -23,6 +23,7 @@ from AgenticAI.agentic.langgraph_runner import AgenticGraphRunner, AgenticState
 from AgenticAI.agentic.pdf_report import render_requirements_pdf
 from AgenticAI.mcp.client import MCPToolClient
 from AgenticAI.pipeline.ingestion import ingest_documents, vector_store_exists
+from AgenticAI.Vectorization.vectorStore.store_factory import load_store_config, resolve_backend
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
@@ -33,11 +34,31 @@ PACKAGE_PROBES = (
     "langchain-google-genai",
     "langchain-openai",
     "openai",
+    "pymilvus",
     "google-generativeai",
     "google-ai-generativelanguage",
     "modelcontextprotocol",
     "mcp",
 )
+
+
+def _load_document_index(vector_dir: str) -> Dict[str, Dict[str, str]]:
+    config = load_store_config(vector_dir)
+    index_path = config.get("document_index") if config else None
+    if index_path:
+        path = Path(index_path)
+    else:
+        path = Path(vector_dir) / "document_index.json"
+
+    if not path.exists():
+        return {}
+    with path.open("r", encoding="utf-8") as handle:
+        payload = json.load(handle)
+    if isinstance(payload, dict):
+        return payload
+    if isinstance(payload, list):
+        return {item["source"]: item for item in payload if isinstance(item, dict) and "source" in item}
+    return {}
 
 
 def _get_llm_provider() -> str:
@@ -128,7 +149,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--vector-dir",
         default="artifacts/vector_store",
-        help="Directory where the FAISS store and metadata are stored",
+        help="Directory where vector store metadata is stored",
     )
     parser.add_argument(
         "--server-script",
@@ -136,6 +157,7 @@ def parse_args() -> argparse.Namespace:
         help="Path to the MCP regulation server script",
     )
     parser.add_argument("--rebuild-store", action="store_true", help="Force rebuilding the vector store")
+    parser.add_argument("--skip-ingestion", action="store_true", help="Skip embedding; require existing vector store")
     parser.add_argument(
         "--top-k",
         type=int,
@@ -194,15 +216,27 @@ async def run_pipeline(args: argparse.Namespace, progress_callback: Optional[Pro
     _notify("init", 1.0, "Pipeline initialized")
 
     vector_dir = args.vector_dir
+    vector_backend = resolve_backend(os.getenv("VECTOR_STORE_BACKEND"))
     vector_exists = vector_store_exists(vector_dir)
-    logger.info("Vector store present=%s (rebuild=%s)", vector_exists, args.rebuild_store)
-    if args.rebuild_store or not vector_exists:
+    skip_ingestion = bool(getattr(args, "skip_ingestion", False))
+    logger.info(
+        "Vector store present=%s (backend=%s, rebuild=%s, skip_ingestion=%s)",
+        vector_exists,
+        vector_backend,
+        args.rebuild_store,
+        skip_ingestion,
+    )
+    if skip_ingestion and not vector_exists:
+        raise ValueError("Vector store not found; run embeddings before generating requirements.")
+    if not skip_ingestion and (args.rebuild_store or not vector_exists or vector_backend == "milvus"):
         _notify("ingestion", 0.0, "Ingesting PDFs into vector store")
         logger.info("Starting ingestion into %s", vector_dir)
         await asyncio.to_thread(
             ingest_documents,
             data_dir=args.data_dir,
             persist_dir=vector_dir,
+            vector_store_backend=vector_backend,
+            include_sources=None,
             progress_callback=lambda progress, message=None: _notify("ingestion", progress, message),
         )
         logger.info("Finished ingestion into %s", vector_dir)
@@ -212,6 +246,22 @@ async def run_pipeline(args: argparse.Namespace, progress_callback: Optional[Pro
 
     _notify("parsing", 0.0, "Parsing PDFs")
     pdf_files = sorted(Path(args.data_dir).glob("*.pdf"), key=lambda path: path.name.lower())
+    if skip_ingestion:
+        document_index = _load_document_index(vector_dir)
+        embedded_sources = sorted(document_index.keys())
+        if not embedded_sources:
+            raise ValueError("No embedded PDFs found. Run embeddings before generating requirements.")
+        resolved_files: List[Path] = []
+        missing_sources: List[str] = []
+        for source in embedded_sources:
+            path = Path(args.data_dir) / source
+            if path.exists():
+                resolved_files.append(path)
+            else:
+                missing_sources.append(source)
+        if missing_sources:
+            logger.warning("Embedded sources missing from data dir: %s", ", ".join(missing_sources))
+        pdf_files = resolved_files
     if not pdf_files:
         raise ValueError("No PDF files found for parsing")
 
@@ -288,7 +338,11 @@ async def run_pipeline(args: argparse.Namespace, progress_callback: Optional[Pro
                 "doc_text": doc.text,
                 "doc_headings": doc.headings,
             }
-            processed_state = await runner.process_document(state)
+            def doc_status(message: str, fraction: float) -> None:
+                progress = (idx - 1 + max(0.0, min(1.0, fraction))) / total_docs
+                _notify("documents", progress, f"{message} - {doc.source} ({idx}/{total_docs})")
+
+            processed_state = await runner.process_document(state, status_callback=doc_status)
             _notify("documents", idx / total_docs, f"Completed {doc.source} ({idx}/{total_docs})")
 
             aggregated_chunks.extend(processed_state.get("retrieval_results", []))

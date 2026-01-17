@@ -6,8 +6,8 @@
 
 The project now delivers an end-to-end agentic RAG workflow tailored for regulatory intelligence. At a high level:
 
-- **Ingestion** – `AgenticAI.pipeline.ingestion` parses PDFs with `pdfplumber`, chunks them, embeds text with SentenceTransformers, and persists a FAISS index plus metadata under `artifacts/vector_store`.
-- **MCP tooling** – `AgenticAI/mcp_servers/regulation_server.py` exposes three FastMCP tools: `retrieve_chunks` (FAISS semantic search), `web_search` (DuckDuckGo metadata feed), and `fetch_web_page` (sanitized HTML fetch capped at 4k characters). They are consumed exclusively through `AgenticAI.mcp.client.MCPToolClient`, so every retrieval or open-web lookup stays behind the MCP boundary.
+- **Ingestion** – `AgenticAI.pipeline.ingestion` parses PDFs with `pdfplumber`, chunks them, embeds text with SentenceTransformers, and persists vectors to FAISS (default) or Milvus (incremental) under `artifacts/vector_store`.
+- **MCP tooling** – `AgenticAI/mcp_servers/regulation_server.py` exposes three FastMCP tools: `retrieve_chunks` (vector search via FAISS or Milvus), `web_search` (DuckDuckGo metadata feed), and `fetch_web_page` (sanitized HTML fetch capped at 4k characters). They are consumed exclusively through `AgenticAI.mcp.client.MCPToolClient`, so every retrieval or open-web lookup stays behind the MCP boundary.
 - **LangGraph agents** – `AgenticAI.agentic.langgraph_runner.AgenticGraphRunner` wires a LangGraph (`query_agent → retrieval → context → requirements → END`) across two Gemini models (Flash + Pro) plus helper chains that vet web candidates before fetching.
 - **Decision logging** – `AgenticAI.agentic.decision_logger.DecisionLogger` streams every step (queries, retrieval hits, screening decisions, requirement counts) to `artifacts/agent_decisions.jsonl` for auditability.
 - **Orchestration** – `AgenticAI.agentic.pipeline_runner` handles ingestion checks, starts the MCP server, runs per-document LangGraph passes, aggregates summaries/chunks, and writes the consolidated requirements bundle to `artifacts/requirements.json` plus a business-friendly PDF at `artifacts/requirements.pdf` by default.
@@ -24,7 +24,7 @@ The project now delivers an end-to-end agentic RAG workflow tailored for regulat
 2. **`_retrieval_node` (deterministic vector search)**
 	- For each query from Agent 1, calls `MCPToolClient.call_tool("retrieve_chunks", {"query": query, "top_k": retrieval_top_k})` (default 15).
 	- Duplicate hits from the same `source`/`page` pair are collapsed, keeping only the highest-scoring chunk so downstream prompts stay concise.
-	- The MCP tool embeds the query with the persisted SentenceTransformer model, performs FAISS search, and returns chunk metadata. Each row is validated via the `RetrievalChunk` model before being appended to `state["retrieval_results"]`.
+	- The MCP tool embeds the query with the persisted SentenceTransformer model, performs vector search (FAISS or Milvus), and returns chunk metadata. Each row is validated via the `RetrievalChunk` model before being appended to `state["retrieval_results"]`.
 
 3. **`_context_node` (context assessor + open-web gatekeeper)**
 	- Model: Same Gemini Flash instance but with a different prompt instructing it to decide whether additional context is required.
@@ -105,6 +105,7 @@ Inspect `artifacts/agent_decisions.jsonl` to replay the agent’s reasoning or f
 	- Frontend: `http://localhost:3000`
 	- Backend health: `http://localhost:8000`
 	- Generate requirements: `POST http://localhost:8000/api/pipeline`
+	- Milvus UI (Attu): `http://localhost:8001` (connect to `milvus:19530`)
 
 ## Local run (CLI)
 
@@ -121,7 +122,7 @@ Inspect `artifacts/agent_decisions.jsonl` to replay the agent’s reasoning or f
 	export GEMINI_API_KEY="<your_gemini_key>"
 	```
 
-	The same key is forwarded to `GOOGLE_API_KEY` for the LangChain Gemini client. Optionally set `VECTOR_STORE_DIR` if you want a custom persistence folder.
+	The same key is forwarded to `GOOGLE_API_KEY` for the LangChain Gemini client. Optionally set `VECTOR_STORE_BACKEND=milvus` (plus `MILVUS_HOST`/`MILVUS_PORT`) if you want incremental Milvus storage, or set `VECTOR_STORE_DIR` if you want a custom persistence folder.
 
 3. **Run the pipeline**
 
@@ -130,7 +131,7 @@ Inspect `artifacts/agent_decisions.jsonl` to replay the agent’s reasoning or f
 	```
 
 	The runner will:
-	- rebuild the FAISS store (unless it already exists and `--rebuild-store` is omitted),
+	- rebuild the FAISS store (unless it already exists and `--rebuild-store` is omitted) or incrementally update Milvus,
 	- start the MCP regulation server automatically,
 	- execute the LangGraph pipeline per document,
 	- persist the JSON requirements bundle to `artifacts/requirements.json` and a formatted PDF to `artifacts/requirements.pdf` (configurable via `--pdf-output`).
@@ -152,14 +153,14 @@ For a friendlier view of the generated requirements, a static viewer lives under
 ## Useful CLI flags
 
 - `--rebuild-store` – force ingestion even if a vector store already exists.
-- `--top-k` – number of FAISS chunks fetched per query (default 15).
+- `--top-k` – number of chunks fetched per query (default 15).
 - `--server-script` – run a custom MCP server implementation if needed.
 - `--output` – change the output JSON path.
 - `--pdf-output` – change where the PDF rendering is stored (default `artifacts/requirements.pdf`).
 
 ## Project layout
 
-- `AgenticAI/pipeline/ingestion.py` – ingestion & FAISS persistence helpers.
+- `AgenticAI/pipeline/ingestion.py` – ingestion helpers for FAISS and Milvus.
 - `AgenticAI/mcp_servers/regulation_server.py` – FastMCP server exposing retrieval, metadata search, and fetch tools.
 - `AgenticAI/mcp/client.py` – lightweight stdio MCP client for the LangGraph runner.
 - `AgenticAI/agentic/*` – document grouping utilities, Pydantic schemas, and LangGraph orchestration.

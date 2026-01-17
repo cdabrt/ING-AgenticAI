@@ -17,6 +17,7 @@ def app_client(tmp_path, monkeypatch):
     monkeypatch.setenv("DATA_DIR", str(data_dir))
     monkeypatch.setenv("REQUIREMENTS_OUTPUT", str(output_path))
     monkeypatch.setenv("VECTOR_STORE_DIR", str(tmp_path / "vector_store"))
+    monkeypatch.setenv("VECTOR_STORE_BACKEND", "faiss")
     monkeypatch.setenv("REQUIREMENTS_PDF_OUTPUT", str(tmp_path / "artifacts" / "requirements.pdf"))
     monkeypatch.setenv("DECISION_LOG_PATH", str(tmp_path / "artifacts" / "agent_decisions.jsonl"))
 
@@ -129,3 +130,22 @@ def test_pipeline_endpoint_writes_output(app_client, monkeypatch):
     assert isinstance(payload, list)
     assert payload[0]["document"] == "Test"
     assert output_path.exists()
+
+
+def test_embeddings_endpoint_accepts_selection(app_client, monkeypatch):
+    client, app_module, data_dir, _ = app_client
+
+    pdf_path = data_dir / "sample.pdf"
+    pdf_path.write_bytes(_make_pdf_bytes())
+
+    called = {}
+
+    def fake_ingest(**kwargs):
+        called["include_sources"] = kwargs.get("include_sources")
+        return {"chunks": 1, "pdf_files": 1}
+
+    monkeypatch.setattr(app_module, "ingest_documents", fake_ingest)
+
+    response = client.post("/api/embeddings", json={"pdf_ids": [1]})
+    assert response.status_code == 200
+    assert called["include_sources"] == ["sample.pdf"]

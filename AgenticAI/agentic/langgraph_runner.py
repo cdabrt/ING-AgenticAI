@@ -6,7 +6,7 @@ import os
 import random
 import re
 import time
-from typing import Any, Dict, List, Tuple, TypedDict, cast
+from typing import Any, Callable, Dict, List, Optional, Tuple, TypedDict, cast
 
 from langchain_core.exceptions import OutputParserException
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -192,7 +192,7 @@ class AgenticGraphRunner:
             [
                 (
                     "system",
-                    "You are Agent 1, a regulatory discovery strategist supporting a large publicly listed EU bank."
+                    "You are Agent 1, a regulatory discovery strategist supporting ING Bank (a large publicly listed EU bank)."
                     " Study the provided directive/policy text, extract its dominant themes (scope, timelines, assurance, data needs),"
                     " and craft sharply focused retrieval queries that will surface the smallest set of chunks needed to understand implementation obligations."
                     " Return JSON matching the schema described in the instructions and make the summary actionable for a financial-services audience.",
@@ -275,7 +275,11 @@ class AgenticGraphRunner:
 
         return [best_by_location[key] for key in order]
 
-    async def _context_node(self, state: AgenticState) -> AgenticState:
+    async def _context_node(
+        self,
+        state: AgenticState,
+        status_callback: Optional[Callable[[str, float], None]] = None,
+    ) -> AgenticState:
         retrieval_chunks = state.get("retrieval_results", [])
         # Pass a trimmed JSON payload so the assessor can inspect actual snippets without blowing up the prompt.
         chunk_preview = json.dumps(retrieval_chunks[:20]) if retrieval_chunks else "[]"
@@ -285,7 +289,7 @@ class AgenticGraphRunner:
             [
                 (
                     "system",
-                    "You are the context assessor for Agent 1. Evaluate whether the retrieved chunks alone let a bank draft precise requirements."
+                    "You are the context assessor for Agent 1 at ING Bank. Evaluate whether the retrieved chunks alone let a bank draft precise requirements."
                     " When gaps remain (e.g., unclear thresholds, missing ESRS references, external timelines), recommend up to three follow-up open-web queries."
                     " You will receive the actual retrieved chunks (JSON objects with source/page/chunk_id/text) so ground your judgment in what is already available, and ask for more meaningful context if needed."
                     " Remember you can call the MCP tools `web_search` (metadata only) and `fetch_web_page`"
@@ -327,6 +331,8 @@ class AgenticGraphRunner:
 
         web_context: List[Dict] = []
         if assessment.needs_additional_context:
+            if status_callback:
+                status_callback("Shortlisting web sources", 0.85)
             for query in assessment.missing_information_queries[:3]:
                 payload = await self.mcp_client.call_tool(
                     "web_search",
@@ -376,6 +382,8 @@ class AgenticGraphRunner:
                     if not candidate or not candidate.href:
                         continue
 
+                    if status_callback:
+                        status_callback("Fetching web sources", 0.9)
                     page_payload = await self.mcp_client.call_tool("fetch_web_page", {"url": candidate.href})
                     page_data = json.loads(page_payload)
                     content = page_data.get("content", "")
@@ -548,7 +556,7 @@ class AgenticGraphRunner:
             [
                 (
                     "system",
-                    "You are Agent 2, a senior regulatory implementation architect for a major European bank."
+                    "You are Agent 2, a senior regulatory implementation architect for ING Bank."
                     " Use the retrieved document chunks (and any enriched web context) to translate legal obligations into actionable business and data requirements."
                     " Address governance, risk management, assurance, reporting formats, and data collection duties relevant to lending, investment, and underwriting activities."
                     " Cite chunk IDs/pages for every document-driven statement and include online citations whenever external context informed the requirement."
@@ -606,7 +614,7 @@ class AgenticGraphRunner:
             [
                 (
                     "system",
-                    "You are Agent 2R, a self-reviewing regulatory implementation architect."
+                    "You are Agent 2R, a self-reviewing regulatory implementation architect for ING Bank."
                     " Re-read the previously generated requirements bundle and tighten it."
                     " Revise existing entries by updating their description, rationale, or sources as needed,"
                     " keeping the original `id` whenever you edit an item."
@@ -662,16 +670,26 @@ class AgenticGraphRunner:
         result = await self.graph.ainvoke(state)
         return cast(AgenticState, result)
 
-    async def process_document(self, state: AgenticState) -> AgenticState:
+    async def process_document(
+        self,
+        state: AgenticState,
+        status_callback: Optional[Callable[[str, float], None]] = None,
+    ) -> AgenticState:
         """Run query, retrieval, and context nodes for a single document."""
 
+        if status_callback:
+            status_callback("Drafting retrieval queries", 0.15)
         query_state = await self._query_agent_node(state)
         state.update(query_state)
 
+        if status_callback:
+            status_callback("Retrieving relevant chunks", 0.45)
         retrieval_state = await self._retrieval_node(state)
         state.update(retrieval_state)
 
-        context_state = await self._context_node(state)
+        if status_callback:
+            status_callback("Assessing context gaps", 0.7)
+        context_state = await self._context_node(state, status_callback=status_callback)
         state.update(context_state)
 
         return state

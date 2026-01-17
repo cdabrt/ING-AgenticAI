@@ -21,7 +21,8 @@ from mcp.server.fastmcp import FastMCP
 
 from AgenticAI.Chunker.Chunk import Chunk
 from AgenticAI.Vectorization.VectorEmbedder import VectorEmbedder
-from AgenticAI.Vectorization.vectorStore.FAISS import FAISSStore
+from AgenticAI.Vectorization.vectorStore.VectorStoreAdapter import IVectorStore
+from AgenticAI.Vectorization.vectorStore.store_factory import load_store_config, load_vector_store
 
 logger = logging.getLogger(__name__)
 handler = logging.StreamHandler(sys.stderr)
@@ -57,18 +58,21 @@ async def _ensure_vector_context():
                 f"store_config.json not found at {CONFIG_PATH}. Run ingestion before starting the server."
             )
 
-        with CONFIG_PATH.open("r", encoding="utf-8") as handle:
-            config = json.load(handle)
+        config = load_store_config(str(VECTOR_STORE_DIR))
+        if not config:
+            raise FileNotFoundError(
+                f"store_config.json not found at {CONFIG_PATH}. Run ingestion before starting the server."
+            )
 
         embedder = VectorEmbedder(model_name=config.get("embedding_model_name"))
-        store = FAISSStore.load(str(VECTOR_STORE_DIR), use_cosine_similarity=config.get("use_cosine_similarity", True))
+        store = load_vector_store(str(VECTOR_STORE_DIR), config)
 
         _VECTOR_CONTEXT = {
             "config": config,
             "embedder": embedder,
             "store": store,
         }
-        logger.info("Loaded FAISS store with %s chunks", config.get("chunk_count"))
+        logger.info("Loaded vector store with %s chunks", config.get("chunk_count"))
         return _VECTOR_CONTEXT
 
 
@@ -157,7 +161,7 @@ async def retrieve_chunks(query: str, top_k: int = 8) -> str:
 
     context = await _ensure_vector_context()
     embedder: VectorEmbedder = context["embedder"]
-    store: FAISSStore = context["store"]
+    store: IVectorStore = context["store"]
 
     query_embedding = embedder.embed_queries([query])[0]
     raw_results = store.top_k_search(query_embedding, top_k=top_k)

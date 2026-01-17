@@ -1,3 +1,4 @@
+import os
 from typing import List, Dict
 from AgenticAI.Chunker.Chunk import Chunk
 from AgenticAI.Chunker.Chunker import Chunker
@@ -5,6 +6,7 @@ from AgenticAI.PDF.PDFParser import PDFParser
 from AgenticAI.Vectorization.VectorEmbedder import VectorEmbedder
 from AgenticAI.Vectorization.vectorStore.FAISS import FAISSStore
 from AgenticAI.Vectorization.vectorStore.VectorStoreAdapter import IVectorStore
+from AgenticAI.Vectorization.vectorStore.store_factory import resolve_backend
 
 def store_chunks_and_embeds(chunk_list : List[Chunk]):
     vector_embedder : VectorEmbedder = VectorEmbedder()
@@ -12,8 +14,12 @@ def store_chunks_and_embeds(chunk_list : List[Chunk]):
     dimension : int = embed_tuple[0]
     chunk_vector_embed_dict : List[Dict] = embed_tuple[1]
 
-    # TODO: still dependency to implementation. Might need something like a simple factory if we wish to expand upon this
-    vector_store : IVectorStore = FAISSStore(dimensions=dimension, use_cosine_similarity=True)
+    backend = resolve_backend(os.getenv("VECTOR_STORE_BACKEND"))
+    if backend == "milvus":
+        from AgenticAI.Vectorization.vectorStore.Milvus import MilvusStore
+        vector_store = MilvusStore.from_env(dimensions=dimension, use_cosine_similarity=True, auto_create=True)
+    else:
+        vector_store = FAISSStore(dimensions=dimension, use_cosine_similarity=True)
 
     vector_store.store_embeds_and_metadata(chunk_vector_embed_dict)
 

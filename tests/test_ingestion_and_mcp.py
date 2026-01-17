@@ -45,6 +45,7 @@ def test_ingestion_persists_vector_store(tmp_path, monkeypatch):
     _write_pdf(data_dir / "sample.pdf", ["Heading", "Body text for ingestion."])
 
     vector_dir = tmp_path / "vector_store"
+    monkeypatch.setenv("VECTOR_STORE_BACKEND", "faiss")
     monkeypatch.setattr(ingestion, "VectorEmbedder", FakeEmbedder)
 
     result = ingestion.ingest_documents(
@@ -70,6 +71,7 @@ def test_mcp_tools_use_persisted_store(tmp_path, monkeypatch):
     _write_pdf(data_dir / "sample.pdf", ["Heading", "Body text for MCP test."])
 
     vector_dir = tmp_path / "vector_store"
+    monkeypatch.setenv("VECTOR_STORE_BACKEND", "faiss")
     monkeypatch.setattr(ingestion, "VectorEmbedder", FakeEmbedder)
     ingestion.ingest_documents(
         data_dir=str(data_dir),

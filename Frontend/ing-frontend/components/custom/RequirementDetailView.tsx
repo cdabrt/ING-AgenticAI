@@ -16,7 +16,7 @@ function RequirementDetailView({ requirement }: { requirement: RequirementItem |
     }
 
     return (
-        <ScrollArea className="h-full w-full overflow-y-auto">
+        <ScrollArea className="h-full w-full overflow-y-auto overflow-x-hidden min-w-0">
             <div className="p-6 space-y-6">
                 {/* Header with ID */}
                 <div>
@@ -30,7 +30,7 @@ function RequirementDetailView({ requirement }: { requirement: RequirementItem |
                     <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
                         Description
                     </h3>
-                    <p className="text-base leading-relaxed">
+                    <p className="text-base leading-relaxed break-words">
                         {requirement.description}
                     </p>
                 </div>
@@ -42,7 +42,7 @@ function RequirementDetailView({ requirement }: { requirement: RequirementItem |
                     <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
                         Rationale
                     </h3>
-                    <p className="text-base leading-relaxed text-muted-foreground">
+                    <p className="text-base leading-relaxed text-muted-foreground break-words">
                         {requirement.rationale}
                     </p>
                 </div>
@@ -61,7 +61,7 @@ function RequirementDetailView({ requirement }: { requirement: RequirementItem |
                                     <CardContent className="px-4">
                                         <div className="flex items-start gap-2">
                                             <FileText className="h-4 w-4 mt-0.5 text-primary flex-shrink-0" />
-                                            <span className="text-sm">{source}</span>
+                                            <span className="text-sm break-words">{source}</span>
                                         </div>
                                     </CardContent>
                                 </Card>

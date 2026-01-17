@@ -1,7 +1,7 @@
 import { FileText, Lightbulb, Briefcase, Database } from "lucide-react";
+import { Badge } from "../ui/badge";
 import { Card, CardContent } from "../ui/card";
 import { Separator } from "../ui/separator";
-import { Badge } from "../ui/badge";
 import { RequirementBundle } from "@/lib/types";
 import { ScrollArea } from "../ui/scroll-area";
 
@@ -17,17 +17,17 @@ function BundleDetailView({ bundle }: { bundle: RequirementBundle | null }) {
     }
 
     return (
-        <ScrollArea className="h-full w-full">
+        <ScrollArea className="h-full w-full overflow-x-hidden min-w-0">
             <div className="p-6 space-y-6">
                 {/* Header with Document Name and Type */}
                 <div className="space-y-3">
                     <div className="flex items-center gap-3">
                         <FileText className="h-6 w-6 text-primary" />
-                        <h2 className="text-2xl font-semibold">{bundle.document}</h2>
+                        <h2 className="text-2xl font-semibold break-words">{bundle.document}</h2>
                     </div>
-                    <Badge variant="secondary" className="text-sm">
+                    <div className="rounded-lg bg-muted px-3 py-2 text-xs text-muted-foreground whitespace-normal break-words">
                         {bundle.document_type}
-                    </Badge>
+                    </div>
                 </div>
 
                 <Separator />
@@ -54,7 +54,7 @@ function BundleDetailView({ bundle }: { bundle: RequirementBundle | null }) {
                                                     {requirement.id}
                                                 </span>
                                             </div>
-                                            <p className="text-sm leading-relaxed">
+                                            <p className="text-sm leading-relaxed break-words">
                                                 {requirement.description}
                                             </p>
                                         </div>
@@ -91,7 +91,7 @@ function BundleDetailView({ bundle }: { bundle: RequirementBundle | null }) {
                                                     {requirement.id}
                                                 </span>
                                             </div>
-                                            <p className="text-sm leading-relaxed">
+                                            <p className="text-sm leading-relaxed break-words">
                                                 {requirement.description}
                                             </p>
                                         </div>
@@ -126,7 +126,7 @@ function BundleDetailView({ bundle }: { bundle: RequirementBundle | null }) {
                                             <span className="text-sm font-medium text-muted-foreground min-w-6">
                                                 {index + 1}.
                                             </span>
-                                            <span className="text-sm leading-relaxed">{assumption}</span>
+                                            <span className="text-sm leading-relaxed break-words">{assumption}</span>
                                         </div>
                                     </CardContent>
                                 </Card>
