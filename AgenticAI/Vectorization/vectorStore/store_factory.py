@@ -1,4 +1,5 @@
 import json
+import os
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -9,6 +10,15 @@ def resolve_backend(value: Optional[str]) -> str:
     if not value:
         return "faiss"
     return value.strip().lower() or "faiss"
+
+
+def resolve_enable_hybrid(config: Dict[str, Any]) -> bool:
+    env_value = os.getenv("MILVUS_ENABLE_HYBRID")
+    if env_value is not None:
+        return env_value.strip().lower() in ("1", "true", "yes", "y")
+    if "enable_hybrid" in config:
+        return bool(config["enable_hybrid"])
+    return True
 
 
 def load_store_config(persist_dir: str) -> Dict[str, Any]:
@@ -23,6 +33,7 @@ def load_vector_store(persist_dir: str, config: Dict[str, Any]):
     backend = resolve_backend(config.get("vector_store"))
     use_cosine_similarity = config.get("use_cosine_similarity", True)
     if backend == "milvus":
+        enable_hybrid = resolve_enable_hybrid(config)
         try:
             from AgenticAI.Vectorization.vectorStore.Milvus import MilvusStore
         except ModuleNotFoundError as exc:
@@ -35,5 +46,6 @@ def load_vector_store(persist_dir: str, config: Dict[str, Any]):
             use_cosine_similarity=use_cosine_similarity,
             collection_name=config.get("collection_name"),
             auto_create=False,
+            enable_hybrid=enable_hybrid,
         )
     return FAISSStore.load(persist_dir, use_cosine_similarity=use_cosine_similarity)

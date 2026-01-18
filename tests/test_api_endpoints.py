@@ -132,6 +132,21 @@ def test_pipeline_endpoint_writes_output(app_client, monkeypatch):
     assert output_path.exists()
 
 
+def test_pipeline_endpoint_respects_throttle_env(app_client, monkeypatch):
+    client, app_module, _, _ = app_client
+    captured = {}
+
+    async def fake_run_pipeline(args, progress_callback=None):
+        captured["throttle_enabled"] = args.throttle_enabled
+
+    monkeypatch.setattr(app_module, "run_pipeline", fake_run_pipeline)
+    monkeypatch.setenv("PIPELINE_THROTTLE_ENABLED", "false")
+
+    response = client.post("/api/pipeline", json={"skip_ingestion": False})
+    assert response.status_code == 200
+    assert captured["throttle_enabled"] is False
+
+
 def test_embeddings_endpoint_accepts_selection(app_client, monkeypatch):
     client, app_module, data_dir, _ = app_client
 

@@ -44,7 +44,7 @@ class FAISSStore(IVectorStore):
         self.chunk_store.extend([chunk['chunk'] for chunk in chunks_with_embeds])
         logger.info("FAISS index size is now %s", self.index.ntotal)
 
-    def top_k_search(self, query_embedding, top_k=5):
+    def top_k_search(self, query_embedding, top_k=5, query_text: str | None = None):
         query_vec = numpy.array([query_embedding], dtype='float32')
         if self.use_cosine_similarity:
             faiss.normalize_L2(query_vec)

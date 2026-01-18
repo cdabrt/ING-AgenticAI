@@ -27,7 +27,7 @@ def store_chunks_and_embeds(chunk_list : List[Chunk]):
     test_query = "Sustainability reporting obligations for companies in the EU"
     query_embedding = vector_embedder.model.encode([test_query], normalize_embeddings=True)[0]
 
-    results = vector_store.top_k_search(query_embedding, top_k=10)
+    results = vector_store.top_k_search(query_embedding, top_k=10, query_text=test_query)
 
     for r in results:
         chunk = Chunk.model_validate_json(r["chunk"])

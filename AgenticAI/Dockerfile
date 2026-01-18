@@ -5,6 +5,9 @@ WORKDIR /app
 COPY setup.py .
 RUN pip install --no-cache-dir -e .
 
+COPY requirements-dev.txt .
+RUN pip install --no-cache-dir -r requirements-dev.txt
+
 COPY . .
 
 EXPOSE 8000

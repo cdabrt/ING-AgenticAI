@@ -20,6 +20,7 @@ from AgenticAI.PDF.PDFParser import PDFParser
 from AgenticAI.agentic.decision_logger import DecisionLogger
 from AgenticAI.agentic.documents import group_documents_by_source
 from AgenticAI.agentic.langgraph_runner import AgenticGraphRunner, AgenticState
+from AgenticAI.agentic.models import RequirementBundle
 from AgenticAI.agentic.pdf_report import render_requirements_pdf
 from AgenticAI.mcp.client import MCPToolClient
 from AgenticAI.pipeline.ingestion import ingest_documents, vector_store_exists
@@ -165,6 +166,17 @@ def parse_args() -> argparse.Namespace:
         help="Number of chunks to fetch per query during retrieval",
     )
     parser.add_argument(
+        "--web-search-enabled",
+        default=None,
+        help="Enable open-web search (true/false).",
+    )
+    parser.add_argument(
+        "--max-web-queries-per-doc",
+        type=int,
+        default=None,
+        help="Maximum open-web queries per document.",
+    )
+    parser.add_argument(
         "--output",
         default="artifacts/requirements.json",
         help="Path where the consolidated requirements JSON will be saved",
@@ -182,7 +194,7 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-ProgressCallback = Callable[[str, float, Optional[str]], None]
+ProgressCallback = Callable[[str, float, Optional[str], Optional[Dict[str, Optional[str] | int]]], None]
 
 
 async def run_pipeline(args: argparse.Namespace, progress_callback: Optional[ProgressCallback] = None):
@@ -209,9 +221,38 @@ async def run_pipeline(args: argparse.Namespace, progress_callback: Optional[Pro
             running += weight
         return min(1.0, running)
 
-    def _notify(stage: str, fraction: float, message: Optional[str] = None) -> None:
+    current_stage = "init"
+    current_progress = 0.0
+    current_message: Optional[str] = None
+    llm_calls_done = 0
+
+    def _notify(
+        stage: str,
+        fraction: float,
+        message: Optional[str] = None,
+        meta: Optional[Dict[str, Optional[str] | int]] = None,
+    ) -> None:
+        nonlocal current_stage, current_progress, current_message
+        current_stage = stage
+        current_progress = _overall_progress(stage, fraction)
+        current_message = message
         if progress_callback:
-            progress_callback(stage, _overall_progress(stage, fraction), message)
+            progress_callback(stage, current_progress, message, meta)
+
+    def _notify_llm(meta: Dict[str, Optional[str] | int]) -> None:
+        nonlocal llm_calls_done
+        increment = meta.get("llm_increment")
+        if isinstance(increment, int) and increment > 0:
+            llm_calls_done += increment
+        payload = {
+            "llm_step": meta.get("llm_step"),
+            "llm_detail": meta.get("llm_detail"),
+            "llm_calls_done": llm_calls_done,
+            "llm_calls_total": meta.get("llm_calls_total"),
+            "current_doc": meta.get("current_doc"),
+        }
+        if progress_callback:
+            progress_callback(current_stage, current_progress, current_message, payload)
 
     _notify("init", 1.0, "Pipeline initialized")
 
@@ -299,10 +340,27 @@ async def run_pipeline(args: argparse.Namespace, progress_callback: Optional[Pro
         reasoning_enabled=requirements_reasoning_enabled,
     )
 
-    aggregated_chunks: List[dict] = []
-    aggregated_web: List[dict] = []
-    doc_summaries: List[str] = []
-    doc_types: List[str] = []
+    raw_web_search_enabled = getattr(args, "web_search_enabled", None)
+    if isinstance(raw_web_search_enabled, str):
+        web_search_enabled = _parse_optional_bool(raw_web_search_enabled)
+    elif isinstance(raw_web_search_enabled, bool):
+        web_search_enabled = raw_web_search_enabled
+    else:
+        web_search_enabled = None
+    if web_search_enabled is None:
+        env_web_search = _parse_optional_bool(os.getenv("WEB_SEARCH_ENABLED"))
+        web_search_enabled = True if env_web_search is None else env_web_search
+
+    max_web_queries_per_doc = getattr(args, "max_web_queries_per_doc", None)
+    if max_web_queries_per_doc is None:
+        env_max_queries = os.getenv("WEB_SEARCH_MAX_QUERIES_PER_DOC", "3")
+        try:
+            max_web_queries_per_doc = int(env_max_queries)
+        except ValueError:
+            max_web_queries_per_doc = 3
+    max_web_queries_per_doc = max(0, int(max_web_queries_per_doc))
+
+    doc_bundles: List[RequirementBundle] = []
     doc_names: List[str] = []
 
     decision_logger = DecisionLogger(args.decision_log)
@@ -325,8 +383,11 @@ async def run_pipeline(args: argparse.Namespace, progress_callback: Optional[Pro
             requirements_model=requirements_model,
             mcp_client=mcp_client,
             retrieval_top_k=args.top_k,
+            web_search_enabled=web_search_enabled,
+            max_web_queries_per_doc=max_web_queries_per_doc,
             decision_logger=decision_logger,
             throttle_enabled=throttle_enabled,
+            llm_status_callback=_notify_llm,
         )
 
         total_docs = len(grouped_docs)
@@ -338,46 +399,47 @@ async def run_pipeline(args: argparse.Namespace, progress_callback: Optional[Pro
                 "doc_text": doc.text,
                 "doc_headings": doc.headings,
             }
+
             def doc_status(message: str, fraction: float) -> None:
                 progress = (idx - 1 + max(0.0, min(1.0, fraction))) / total_docs
                 _notify("documents", progress, f"{message} - {doc.source} ({idx}/{total_docs})")
 
+            def doc_status_scaled(message: str, fraction: float, start: float, end: float) -> None:
+                span = max(0.0, end - start)
+                doc_status(message, start + span * max(0.0, min(1.0, fraction)))
+
             processed_state = await runner.process_document(state, status_callback=doc_status)
+            evidence_state = await runner.distill_evidence(
+                processed_state,
+                status_callback=lambda message, fraction: doc_status_scaled(message, fraction, 0.72, 0.9),
+            )
+            processed_state.update(evidence_state)
+            requirements_state = await runner.generate_requirements(
+                processed_state,
+                status_callback=lambda message, fraction: doc_status_scaled(message, fraction, 0.9, 1.0),
+            )
+            bundle_payload = requirements_state.get("requirements")
+            if not bundle_payload:
+                raise RuntimeError(f"Agent 2 did not return requirements for {doc.source}.")
+            doc_bundles.append(RequirementBundle.model_validate(bundle_payload))
             _notify("documents", idx / total_docs, f"Completed {doc.source} ({idx}/{total_docs})")
 
-            aggregated_chunks.extend(processed_state.get("retrieval_results", []))
-            aggregated_web.extend(processed_state.get("web_context", []))
             doc_names.append(doc.source)
-            doc_types.append(processed_state.get("document_type", "unknown"))
-            doc_summaries.append(
-                processed_state.get("document_summary", "No summary generated for this document.")
-            )
 
         if not doc_names:
             raise RuntimeError("No documents were processed; cannot generate requirements.")
 
-        combined_summary_lines = [
-            f"- {name} ({doc_type}): {summary}"
-            for name, doc_type, summary in zip(doc_names, doc_types, doc_summaries)
-        ]
-        combined_summary = "\n".join(combined_summary_lines)
-        combined_type = ", ".join(sorted({dt for dt in doc_types if dt})) or "multiple"
-
-        aggregated_state: AgenticState = {
-            "doc_source": f"Combined documents: {', '.join(doc_names)}",
-            "document_type": combined_type,
-            "document_summary": combined_summary,
-            "retrieval_results": aggregated_chunks,
-            "web_context": aggregated_web,
-        }
-
         _notify("requirements", 0.0, "Generating consolidated requirements")
-        result_state = await runner.generate_requirements(aggregated_state)
+        def requirements_status(message: str, fraction: float) -> None:
+            _notify("requirements", fraction, message)
+
+        merged_bundle = await runner.merge_requirements(
+            doc_bundles,
+            doc_names,
+            status_callback=requirements_status,
+        )
         _notify("requirements", 1.0, "Requirements generated")
-        bundle = result_state.get("requirements")
-        if not bundle:
-            raise RuntimeError("Agent 2 did not return consolidated requirements.")
-        output_records: List[dict] = [bundle]
+        output_records: List[dict] = [merged_bundle.model_dump()]
 
     _notify("output", 0.0, "Writing output files")
     output_path = Path(args.output)

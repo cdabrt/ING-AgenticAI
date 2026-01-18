@@ -59,6 +59,20 @@ class ContextAssessment(BaseModel):
     explanation: str
 
 
+class EvidenceCard(BaseModel):
+    origin: str = Field(..., description="document or web")
+    claim: str = Field(..., description="Atomic obligation or fact extracted from evidence")
+    source: str = Field(..., description="Document name or URL")
+    page: Optional[int] = Field(None, description="Page number for document evidence")
+    chunk_id: Optional[str] = Field(None, description="Chunk identifier for document evidence")
+    certainty: Optional[str] = Field(None, description="High/Medium/Low confidence tag")
+    support: Optional[str] = Field(None, description="Short excerpt supporting the claim")
+
+
+class EvidenceDigest(BaseModel):
+    cards: List[EvidenceCard]
+
+
 class RequirementItem(BaseModel):
     id: str
     description: str

@@ -37,6 +37,11 @@ PIPELINE_STATUS: Dict[str, Optional[str] | float | int] = {
     "retry_after_seconds": None,
     "started_at": None,
     "updated_at": None,
+    "current_doc": None,
+    "llm_step": None,
+    "llm_detail": None,
+    "llm_calls_done": 0,
+    "llm_calls_total": None,
 }
 
 EMBEDDING_STATUS: Dict[str, Optional[str] | float] = {
@@ -48,10 +53,6 @@ EMBEDDING_STATUS: Dict[str, Optional[str] | float] = {
     "updated_at": None,
 }
 
-PIPELINE_SETTINGS: Dict[str, bool] = {
-    "throttle_enabled": True,
-}
-
 PIPELINE_RATE_EMA: Optional[float] = None
 PIPELINE_LAST_PROGRESS: Optional[float] = None
 PIPELINE_LAST_PROGRESS_AT: Optional[datetime] = None
@@ -59,6 +60,17 @@ PIPELINE_LAST_PROGRESS_AT: Optional[datetime] = None
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _parse_optional_bool(value: Optional[str]) -> Optional[bool]:
+    if value is None:
+        return None
+    lowered = value.strip().lower()
+    if lowered in ("1", "true", "yes", "y", "on"):
+        return True
+    if lowered in ("0", "false", "no", "n", "off"):
+        return False
+    return None
 
 
 def _update_status(
@@ -69,6 +81,11 @@ def _update_status(
     progress: Optional[float] = None,
     started_at: Optional[str] = None,
     retry_after_seconds: Optional[int] = None,
+    current_doc: Optional[str] = None,
+    llm_step: Optional[str] = None,
+    llm_detail: Optional[str] = None,
+    llm_calls_done: Optional[int] = None,
+    llm_calls_total: Optional[int] = None,
 ) -> None:
     global PIPELINE_RATE_EMA
     global PIPELINE_LAST_PROGRESS
@@ -82,6 +99,11 @@ def _update_status(
         PIPELINE_LAST_PROGRESS = progress if progress is not None else 0.0
         PIPELINE_LAST_PROGRESS_AT = now
         PIPELINE_STATUS["eta_seconds"] = None
+        PIPELINE_STATUS["current_doc"] = None
+        PIPELINE_STATUS["llm_step"] = None
+        PIPELINE_STATUS["llm_detail"] = None
+        PIPELINE_STATUS["llm_calls_done"] = 0
+        PIPELINE_STATUS["llm_calls_total"] = None
     elif progress is not None:
         if PIPELINE_LAST_PROGRESS is not None and PIPELINE_LAST_PROGRESS_AT is not None:
             delta_time = (now - PIPELINE_LAST_PROGRESS_AT).total_seconds()
@@ -105,6 +127,16 @@ def _update_status(
     if started_at is not None:
         PIPELINE_STATUS["started_at"] = started_at
     PIPELINE_STATUS["updated_at"] = now_iso
+    if current_doc is not None:
+        PIPELINE_STATUS["current_doc"] = current_doc
+    if llm_step is not None:
+        PIPELINE_STATUS["llm_step"] = llm_step
+    if llm_detail is not None:
+        PIPELINE_STATUS["llm_detail"] = llm_detail
+    if llm_calls_done is not None:
+        PIPELINE_STATUS["llm_calls_done"] = llm_calls_done
+    if llm_calls_total is not None:
+        PIPELINE_STATUS["llm_calls_total"] = llm_calls_total
 
     if state == "running" and PIPELINE_STATUS.get("started_at"):
         try:
@@ -246,6 +278,8 @@ def read_root():
 
 class PipelinePayload(BaseModel):
     skip_ingestion: bool = False
+    web_search_enabled: Optional[bool] = None
+    max_web_queries_per_doc: Optional[int] = None
 
 
 @app.post("/api/pipeline")
@@ -278,12 +312,30 @@ async def run_pipeline_endpoint(payload: PipelinePayload | None = None):
             output=str(OUTPUT_PATH),
             pdf_output=PDF_OUTPUT,
             decision_log=DECISION_LOG,
-            throttle_enabled=PIPELINE_SETTINGS["throttle_enabled"],
+            throttle_enabled=_parse_optional_bool(os.getenv("PIPELINE_THROTTLE_ENABLED")) or False,
             skip_ingestion=bool(payload.skip_ingestion) if payload else False,
+            web_search_enabled=payload.web_search_enabled if payload else None,
+            max_web_queries_per_doc=payload.max_web_queries_per_doc if payload else None,
         )
 
-        def progress_callback(stage: str, progress: float, message: Optional[str] = None) -> None:
-            _update_status(state="running", stage=stage, message=message, progress=progress)
+        def progress_callback(
+            stage: str,
+            progress: float,
+            message: Optional[str] = None,
+            meta: Optional[Dict[str, Optional[str] | int]] = None,
+        ) -> None:
+            meta = meta or {}
+            _update_status(
+                state="running",
+                stage=stage,
+                message=message,
+                progress=progress,
+                current_doc=meta.get("current_doc"),
+                llm_step=meta.get("llm_step"),
+                llm_detail=meta.get("llm_detail"),
+                llm_calls_done=meta.get("llm_calls_done"),
+                llm_calls_total=meta.get("llm_calls_total"),
+            )
 
         try:
             await run_pipeline(args, progress_callback=progress_callback)
@@ -355,7 +407,7 @@ def get_vector_store_status():
     }
 
     if backend == "milvus":
-        collection_name = config.get("collection_name") or os.getenv("MILVUS_COLLECTION", "agenticai_chunks")
+        collection_name = os.getenv("MILVUS_COLLECTION") or config.get("collection_name") or "agenticai_chunks"
         try:
             from AgenticAI.Vectorization.vectorStore.Milvus import MilvusStore
         except ModuleNotFoundError:
@@ -380,6 +432,12 @@ def get_vector_store_status():
 
 class EmbeddingPayload(BaseModel):
     pdf_ids: Optional[List[int]] = None
+
+
+class HighlightPayload(BaseModel):
+    query: str
+    chunk_ids: Optional[List[str]] = None
+    limit: int = 5
 
 
 @app.post("/api/embeddings")
@@ -442,7 +500,7 @@ def delete_embedding(pdf_id: int):
     if source not in document_index:
         raise HTTPException(status_code=404, detail="PDF not embedded")
 
-    collection_name = config.get("collection_name") or os.getenv("MILVUS_COLLECTION", "agenticai_chunks")
+    collection_name = os.getenv("MILVUS_COLLECTION") or config.get("collection_name") or "agenticai_chunks"
     try:
         from AgenticAI.Vectorization.vectorStore.Milvus import MilvusStore
     except ModuleNotFoundError as exc:
@@ -471,19 +529,38 @@ def delete_embedding(pdf_id: int):
     }
 
 
-class ThrottlePayload(BaseModel):
-    enabled: bool
+@app.post("/api/highlights")
+def get_highlights(payload: HighlightPayload):
+    query = payload.query.strip()
+    if not query:
+        raise HTTPException(status_code=400, detail="Query text is required for highlights.")
 
+    config = load_store_config(VECTOR_DIR)
+    if not config:
+        raise HTTPException(status_code=404, detail="Vector store not found")
 
-@app.get("/api/pipeline/throttle")
-def get_pipeline_throttle():
-    return {"enabled": PIPELINE_SETTINGS["throttle_enabled"]}
+    backend = resolve_backend(config.get("vector_store"))
+    if backend != "milvus":
+        raise HTTPException(status_code=400, detail="Highlights are only supported with Milvus.")
 
+    collection_name = os.getenv("MILVUS_COLLECTION") or config.get("collection_name") or "agenticai_chunks"
+    try:
+        from AgenticAI.Vectorization.vectorStore.Milvus import MilvusStore
+    except ModuleNotFoundError as exc:
+        raise HTTPException(status_code=500, detail="pymilvus is required for Milvus operations") from exc
 
-@app.post("/api/pipeline/throttle")
-def set_pipeline_throttle(payload: ThrottlePayload):
-    PIPELINE_SETTINGS["throttle_enabled"] = payload.enabled
-    return {"enabled": PIPELINE_SETTINGS["throttle_enabled"]}
+    store = MilvusStore.from_env(
+        dimensions=config.get("dimension"),
+        use_cosine_similarity=config.get("use_cosine_similarity", True),
+        collection_name=collection_name,
+        auto_create=False,
+    )
+    limit = max(1, min(payload.limit, 10))
+    try:
+        highlights = store.highlight_search(query, chunk_ids=payload.chunk_ids, top_k=limit)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"results": highlights}
 
 
 @app.get("/api/bundles")

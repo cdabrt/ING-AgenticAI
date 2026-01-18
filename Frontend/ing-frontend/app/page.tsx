@@ -49,6 +49,11 @@ interface PipelineStatus {
   progress?: number | null;
   retry_after_seconds?: number | null;
   updated_at?: string | null;
+  current_doc?: string | null;
+  llm_step?: string | null;
+  llm_detail?: string | null;
+  llm_calls_done?: number | null;
+  llm_calls_total?: number | null;
 }
 
 interface VectorStoreStatus {
@@ -128,6 +133,8 @@ export default function Home() {
   const [showUploadDialog, setShowUploadDialog] = useState(false);
   const [pdfData, setPdfData] = useState<File | null>(null);
   const [showPdfViewer, setShowPdfViewer] = useState(false);
+  const [webSearchEnabled, setWebSearchEnabled] = useState(true);
+  const [webSearchLimit, setWebSearchLimit] = useState(3);
 
   const selectedPdfCount = selectedPdfIds.length;
   const allSelected = pdfs.length > 0 && selectedPdfCount === pdfs.length;
@@ -295,7 +302,11 @@ export default function Home() {
     setError(null);
     setLoading(true);
     void getPipelineStatus();
-    return axios.post("/api/pipeline", { skip_ingestion: true }).catch((error) => {
+    return axios.post("/api/pipeline", {
+      skip_ingestion: true,
+      web_search_enabled: webSearchEnabled,
+      max_web_queries_per_doc: webSearchLimit,
+    }).catch((error) => {
       setError(error.message);
     }).then(async () => {
       await getRequirementBundles();
@@ -700,6 +711,51 @@ export default function Home() {
                       {loading ? "Generating..." : "Generate Requirements"}
                     </Button>
                   </div>
+                  <div className="mt-4 rounded-xl border border-zinc-200/80 bg-zinc-50/70 p-4 text-xs text-zinc-600">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <p className="text-[11px] font-semibold text-zinc-700">Online search</p>
+                        <p className="text-[10px] text-zinc-500">Optional enrichment from trusted sources.</p>
+                      </div>
+                      <label className="flex items-center gap-2 text-[11px]">
+                        <span className="text-zinc-500">Disabled</span>
+                        <span className="relative inline-flex items-center">
+                          <input
+                            type="checkbox"
+                            className="peer sr-only"
+                            checked={webSearchEnabled}
+                            onChange={(event) => setWebSearchEnabled(event.target.checked)}
+                            aria-label="Enable online search"
+                          />
+                          <span className="h-5 w-9 rounded-full bg-zinc-200 transition peer-checked:bg-emerald-500" />
+                          <span className="absolute left-1 top-1 h-3 w-3 rounded-full bg-white transition peer-checked:translate-x-4" />
+                        </span>
+                        <span className="text-zinc-700">Enabled</span>
+                      </label>
+                    </div>
+                    <div className="mt-3 flex items-center justify-between gap-3">
+                      <div>
+                        <p className="text-[11px] font-semibold text-zinc-700">Max searches per document</p>
+                        <p className="text-[10px] text-zinc-500">Set to 0 to skip online lookups.</p>
+                      </div>
+                      <input
+                        type="number"
+                        min={0}
+                        max={10}
+                        value={webSearchLimit}
+                        onChange={(event) => {
+                          const value = Number(event.target.value);
+                          if (Number.isNaN(value)) {
+                            return;
+                          }
+                          setWebSearchLimit(Math.max(0, Math.min(10, value)));
+                        }}
+                        disabled={!webSearchEnabled}
+                        className="h-8 w-16 rounded-md border border-zinc-200 bg-white px-2 text-center text-xs text-zinc-700"
+                        aria-label="Max searches per document"
+                      />
+                    </div>
+                  </div>
                   <div className="mt-4 flex flex-wrap items-center gap-6 text-sm text-zinc-600">
                     <div className="flex items-center gap-2">
                       <span className={`h-2 w-2 rounded-full ${statusTone(pipelineStatus?.state)}`} />
@@ -716,6 +772,27 @@ export default function Home() {
                     <div className="rounded-lg border border-zinc-200/70 bg-zinc-50/80 px-3 py-2 text-[11px] text-zinc-600">
                       <span className="font-semibold text-zinc-800">Stage:</span> {pipelineStage} - {pipelineStageLabel}
                     </div>
+                    {(pipelineStatus?.llm_step || pipelineStatus?.current_doc) && (
+                      <div className="rounded-lg border border-amber-200/70 bg-amber-50/70 px-3 py-2 text-[11px] text-amber-800">
+                        <div>
+                          <span className="font-semibold">LLM:</span>{" "}
+                          {pipelineStatus?.llm_step || "Working"}
+                          {pipelineStatus?.llm_detail ? ` (${pipelineStatus.llm_detail})` : ""}
+                        </div>
+                        {pipelineStatus?.current_doc && (
+                          <div className="text-[10px] text-amber-700">
+                            <span className="font-semibold">Doc:</span> {pipelineStatus.current_doc}
+                          </div>
+                        )}
+                        {pipelineStatus?.llm_calls_done !== null && pipelineStatus?.llm_calls_done !== undefined && (
+                          <div className="text-[10px] text-amber-700">
+                            <span className="font-semibold">Calls:</span>{" "}
+                            {pipelineStatus.llm_calls_done}
+                            {pipelineStatus?.llm_calls_total ? ` / ${pipelineStatus.llm_calls_total}` : ""}
+                          </div>
+                        )}
+                      </div>
+                    )}
                     <div className="h-1.5 w-full rounded-full bg-zinc-100">
                       <div
                         className="h-full rounded-full bg-zinc-900/80 transition-[width]"

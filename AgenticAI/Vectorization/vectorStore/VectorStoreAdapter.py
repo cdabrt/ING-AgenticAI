@@ -12,5 +12,5 @@ class IVectorStore(ABC):
         pass
 
     @abstractmethod
-    def top_k_search(self, query_embedding, top_k=5):
+    def top_k_search(self, query_embedding, top_k=5, query_text: str | None = None):
         pass

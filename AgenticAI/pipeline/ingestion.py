@@ -12,7 +12,11 @@ from AgenticAI.Chunker.Chunker import Chunker
 from AgenticAI.PDF.PDFParser import PDFParser
 from AgenticAI.Vectorization.VectorEmbedder import VectorEmbedder
 from AgenticAI.Vectorization.vectorStore.FAISS import FAISSStore
-from AgenticAI.Vectorization.vectorStore.store_factory import load_store_config, resolve_backend
+from AgenticAI.Vectorization.vectorStore.store_factory import (
+    load_store_config,
+    resolve_backend,
+    resolve_enable_hybrid,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +46,8 @@ def vector_store_exists(persist_dir: str) -> bool:
     config = load_store_config(persist_dir)
     backend = resolve_backend(config.get("vector_store"))
     if backend == "milvus":
-        collection_name = config.get("collection_name") or os.getenv("MILVUS_COLLECTION", "agenticai_chunks")
+        env_collection = os.getenv("MILVUS_COLLECTION")
+        collection_name = env_collection or config.get("collection_name") or "agenticai_chunks"
         try:
             from AgenticAI.Vectorization.vectorStore.Milvus import MilvusStore
         except ModuleNotFoundError as exc:
@@ -287,7 +292,8 @@ def _ingest_documents_milvus(
     target_dir.mkdir(parents=True, exist_ok=True)
     document_index = _load_document_index(target_dir)
     existing_config = load_store_config(persist_dir)
-    collection_name = existing_config.get("collection_name") or os.getenv("MILVUS_COLLECTION", "agenticai_chunks")
+    env_collection = os.getenv("MILVUS_COLLECTION")
+    collection_name = env_collection or existing_config.get("collection_name") or "agenticai_chunks"
 
     current_sources: Dict[str, Dict[str, str]] = {}
     sources_to_ingest: List[Path] = []
@@ -313,6 +319,7 @@ def _ingest_documents_milvus(
 
     existing_dimension = existing_config.get("dimension") if existing_config else None
     previous_parsed_elements = existing_config.get("parsed_elements", 0) if existing_config else 0
+    enable_hybrid = resolve_enable_hybrid(existing_config or {})
 
     vector_embedder = VectorEmbedder()
     vector_store: Optional["MilvusStore"] = None
@@ -325,6 +332,7 @@ def _ingest_documents_milvus(
             use_cosine_similarity=True,
             collection_name=collection_name,
             auto_create=False,
+            enable_hybrid=enable_hybrid,
         )
         if sources_to_delete:
             vector_store.delete_by_sources(sources_to_delete)
@@ -377,6 +385,7 @@ def _ingest_documents_milvus(
                     use_cosine_similarity=True,
                     collection_name=collection_name,
                     auto_create=True,
+                    enable_hybrid=enable_hybrid,
                 )
                 if sources_to_delete:
                     vector_store.delete_by_sources(sources_to_delete)
@@ -409,6 +418,7 @@ def _ingest_documents_milvus(
         "vector_store": "milvus",
         "collection_name": collection_name,
         "use_cosine_similarity": True,
+        "enable_hybrid": enable_hybrid,
         "embedding_model_name": vector_embedder.model_name,
         "chunk_size": chunk_size,
         "chunk_overlap": chunk_overlap,

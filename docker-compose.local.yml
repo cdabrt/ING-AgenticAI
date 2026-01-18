@@ -27,7 +27,7 @@ services:
       - "9001:9001"
 
   milvus:
-    image: milvusdb/milvus:v2.4.4
+    image: milvusdb/milvus:v2.6.8
     command: ["milvus", "run", "standalone"]
     environment:
       - ETCD_ENDPOINTS=etcd:2379

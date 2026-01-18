@@ -42,6 +42,7 @@ REQUEST_HEADERS = {
 
 _VECTOR_CONTEXT: Dict[str, Any] | None = None
 _VECTOR_LOCK = asyncio.Lock()
+_RERANKER: Any | None = None
 
 
 async def _ensure_vector_context():
@@ -86,6 +87,32 @@ def _format_chunk(chunk_json: str, score: float) -> Dict[str, Any]:
         "parent_heading": chunk.parent_heading,
         "text": chunk.document.page_content,
     }
+
+
+def _get_reranker():
+    global _RERANKER
+    enabled = os.getenv("RERANKER_ENABLED", "false").strip().lower() in ("1", "true", "yes", "y")
+    if not enabled:
+        return None
+    if _RERANKER is not None:
+        return _RERANKER
+
+    model_name = os.getenv("RERANKER_MODEL_NAME", "BAAI/bge-reranker-base")
+    device = os.getenv("RERANKER_DEVICE", "cpu")
+    try:
+        from sentence_transformers import CrossEncoder
+    except Exception as exc:  # pragma: no cover - optional dependency path
+        logger.warning("Reranker unavailable: %s", exc)
+        return None
+
+    _RERANKER = CrossEncoder(model_name, device=device)
+    logger.info("Loaded reranker model %s on %s", model_name, device)
+    return _RERANKER
+
+
+def _truncate_text(text: str, limit: int = 1200) -> str:
+    cleaned = " ".join(text.split())
+    return cleaned[:limit]
 
 
 def _clean_text(raw: str, max_chars: int = MAX_WEB_CONTENT_CHARS) -> str:
@@ -164,7 +191,23 @@ async def retrieve_chunks(query: str, top_k: int = 8) -> str:
     store: IVectorStore = context["store"]
 
     query_embedding = embedder.embed_queries([query])[0]
-    raw_results = store.top_k_search(query_embedding, top_k=top_k)
+    candidate_k = max(top_k * 4, 20)
+    raw_results = store.top_k_search(query_embedding, top_k=candidate_k, query_text=query)
+
+    reranker = _get_reranker()
+    if reranker and raw_results:
+        rerank_inputs = []
+        for res in raw_results:
+            chunk = Chunk.model_validate_json(res["chunk"])
+            rerank_inputs.append([query, _truncate_text(chunk.document.page_content)])
+        scores = reranker.predict(rerank_inputs)
+        rescored = []
+        for res, score in zip(raw_results, scores):
+            rescored.append({"chunk": res["chunk"], "score": float(score)})
+        rescored.sort(key=lambda item: item["score"], reverse=True)
+        raw_results = rescored[:top_k]
+    else:
+        raw_results = raw_results[:top_k]
 
     payload = [_format_chunk(res["chunk"], res["score"]) for res in raw_results]
     return json.dumps({"query": query, "results": payload})

@@ -16,6 +16,8 @@ from langgraph.graph import END, StateGraph
 
 from AgenticAI.agentic.models import (
     ContextAssessment,
+    EvidenceCard,
+    EvidenceDigest,
     QuerySpecification,
     RequirementBundle,
     RetrievalChunk,
@@ -38,6 +40,7 @@ class AgenticState(TypedDict, total=False):
     queries: List[str]
     retrieval_results: List[Dict]
     web_context: List[Dict]
+    evidence_cards: List[Dict]
     requirements: Dict
 
 
@@ -66,18 +69,24 @@ class AgenticGraphRunner:
         requirements_model: BaseChatModel,
         mcp_client: MCPToolClient,
         retrieval_top_k: int = 8,
+        web_search_enabled: bool | None = None,
+        max_web_queries_per_doc: int | None = None,
         decision_logger: DecisionLogger | None = None,
         throttle_enabled: bool = True,
+        llm_status_callback: Optional[Callable[[Dict[str, Optional[str] | int]], None]] = None,
     ):
         self.query_model = query_model
         self.requirements_model = requirements_model
         self.mcp_client = mcp_client
         self.retrieval_top_k = retrieval_top_k
+        self.web_search_enabled = self._resolve_web_search_enabled(web_search_enabled)
+        self.max_web_queries_per_doc = self._resolve_web_search_limit(max_web_queries_per_doc)
         self.decision_logger = decision_logger
         self.throttle_enabled = throttle_enabled
         self.query_rate_limiter = AsyncRateLimiter(self._get_query_rpm())
         self.requirements_rate_limiter = AsyncRateLimiter(self._get_requirements_rpm())
         self.graph = self._build_graph()
+        self.llm_status_callback = llm_status_callback
 
     @staticmethod
     def _parse_rpm(value: str | None, default: float) -> float:
@@ -88,6 +97,44 @@ class AgenticGraphRunner:
         except ValueError:
             return default
         return rpm if rpm > 0 else 0.0
+
+    @staticmethod
+    def _parse_bool(value: str | None) -> Optional[bool]:
+        if value is None:
+            return None
+        lowered = value.strip().lower()
+        if lowered in ("1", "true", "yes", "y", "on"):
+            return True
+        if lowered in ("0", "false", "no", "n", "off"):
+            return False
+        return None
+
+    def _resolve_web_search_enabled(self, value: bool | str | None) -> bool:
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            parsed = self._parse_bool(value)
+            if parsed is not None:
+                return parsed
+        env_value = self._parse_bool(os.getenv("WEB_SEARCH_ENABLED"))
+        if env_value is None:
+            return True
+        return env_value
+
+    @staticmethod
+    def _resolve_web_search_limit(value: int | str | None) -> int:
+        if isinstance(value, int):
+            return max(0, value)
+        if isinstance(value, str):
+            try:
+                return max(0, int(value))
+            except ValueError:
+                pass
+        env_value = os.getenv("WEB_SEARCH_MAX_QUERIES_PER_DOC", "3")
+        try:
+            return max(0, int(env_value))
+        except ValueError:
+            return 3
 
     def _get_query_rpm(self) -> float:
         if not self.throttle_enabled:
@@ -173,17 +220,184 @@ class AgenticGraphRunner:
         workflow.add_node("query_agent", self._query_agent_node)
         workflow.add_node("retrieval", self._retrieval_node)
         workflow.add_node("context", self._context_node)
+        workflow.add_node("evidence_distill", self._distill_evidence_node)
         workflow.add_node("requirements", self._requirements_node)
         workflow.add_node("requirements_refinement", self._requirements_refinement_node)
 
         workflow.set_entry_point("query_agent")
         workflow.add_edge("query_agent", "retrieval")
         workflow.add_edge("retrieval", "context")
-        workflow.add_edge("context", "requirements")
+        workflow.add_edge("context", "evidence_distill")
+        workflow.add_edge("evidence_distill", "requirements")
         workflow.add_edge("requirements", "requirements_refinement")
         workflow.add_edge("requirements_refinement", END)
 
         return workflow.compile()
+
+    @staticmethod
+    def _build_structured_chain(model: BaseChatModel, schema):
+        try:
+            return model.with_structured_output(schema, include_raw=True)
+        except Exception:
+            return None
+
+    @staticmethod
+    def _extract_json_payload(text: str) -> str | None:
+        if not text:
+            return None
+        if "```" in text:
+            fence_start = text.find("```")
+            fence_end = text.find("```", fence_start + 3)
+            if fence_end != -1:
+                fenced_body = text[fence_start + 3:fence_end]
+                brace_start = fenced_body.find("{")
+                brace_end = fenced_body.rfind("}")
+                if brace_start != -1 and brace_end != -1 and brace_end > brace_start:
+                    return fenced_body[brace_start:brace_end + 1].strip()
+        fenced = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL | re.IGNORECASE)
+        if fenced:
+            return fenced.group(1).strip()
+        decoder = json.JSONDecoder()
+        last_payload: str | None = None
+        for match in re.finditer(r"{", text):
+            start = match.start()
+            try:
+                _, end = decoder.raw_decode(text[start:])
+            except json.JSONDecodeError:
+                continue
+            last_payload = text[start:start + end].strip()
+        if last_payload:
+            return last_payload
+        last_open = text.rfind("{")
+        last_close = text.rfind("}")
+        if last_open != -1 and last_close != -1 and last_close > last_open:
+            return text[last_open:last_close + 1].strip()
+        return None
+
+    @staticmethod
+    def _extract_message_text(response: Any) -> str:
+        def _flatten(value: Any) -> List[str]:
+            if isinstance(value, str):
+                return [value]
+            if isinstance(value, list):
+                parts: List[str] = []
+                for item in value:
+                    parts.extend(_flatten(item))
+                return parts
+            if isinstance(value, dict):
+                if isinstance(value.get("text"), str):
+                    return [value["text"]]
+                if "content" in value:
+                    return _flatten(value.get("content"))
+                return [str(value)]
+            return [str(value)]
+
+        content = response.content if hasattr(response, "content") else response
+        return "".join(_flatten(content))
+
+    def _emit_llm_status(
+        self,
+        *,
+        step: str,
+        doc_source: Optional[str] = None,
+        detail: Optional[str] = None,
+        increment: int = 1,
+    ) -> None:
+        if not self.llm_status_callback:
+            return
+        payload: Dict[str, Optional[str] | int] = {
+            "llm_step": step,
+            "llm_detail": detail,
+            "current_doc": doc_source,
+            "llm_increment": increment,
+        }
+        self.llm_status_callback(payload)
+
+    async def _coerce_model_output(
+        self,
+        parsed: Any,
+        schema,
+        *,
+        parse_label: str,
+        log_context: Optional[Dict[str, Any]] = None,
+    ):
+        if isinstance(parsed, schema):
+            return parsed
+        if isinstance(parsed, str):
+            recovered = self._extract_json_payload(parsed) or parsed
+            try:
+                return schema.model_validate_json(recovered)
+            except Exception:
+                try:
+                    return schema.model_validate(json.loads(recovered, strict=False))
+                except Exception as exc:
+                    await self._log_event(
+                        "structured_output_parse_error",
+                        {
+                            "stage": parse_label,
+                            "error": str(exc),
+                            "response_excerpt": recovered[:1200],
+                            **(log_context or {}),
+                        },
+                    )
+                    raise
+        try:
+            return schema.model_validate(parsed)
+        except Exception as exc:
+            await self._log_event(
+                "structured_output_parse_error",
+                {
+                    "stage": parse_label,
+                    "error": str(exc),
+                    "response_excerpt": str(parsed)[:1200],
+                    **(log_context or {}),
+                },
+            )
+            raise
+
+    async def _ainvoke_with_parser(
+        self,
+        *,
+        chain,
+        parser: PydanticOutputParser,
+        payload: Dict[str, Any],
+        limiter: AsyncRateLimiter,
+        model_label: str,
+        max_retries: int,
+        parse_label: str,
+        log_context: Optional[Dict[str, Any]] = None,
+    ):
+        response = await self._ainvoke_with_retry(
+            chain=chain,
+            payload=payload,
+            limiter=limiter,
+            model_label=model_label,
+            max_retries=max_retries,
+        )
+        content = self._extract_message_text(response)
+        try:
+            return parser.parse(content)
+        except OutputParserException as exc:
+            recovered = self._extract_json_payload(content)
+            if recovered:
+                try:
+                    return parser.parse(recovered)
+                except OutputParserException:
+                    try:
+                        raw = json.loads(recovered, strict=False)
+                        return parser.parse_obj(raw)
+                    except Exception:
+                        pass
+            log_payload = {
+                "model": model_label,
+                "stage": parse_label,
+                "error": str(exc),
+                "response_excerpt": content[:1200],
+            }
+            if log_context:
+                log_payload.update(log_context)
+            await self._log_event("output_parse_error", log_payload)
+            raise
 
     async def _query_agent_node(self, state: AgenticState) -> AgenticState:
         parser = PydanticOutputParser(pydantic_object=QuerySpecification)
@@ -204,10 +418,11 @@ class AgenticGraphRunner:
                 ),
             ]
         )
-        chain = prompt | self.query_model | parser
+        chain = prompt | self.query_model
         headings_text = " | ".join(state.get("doc_headings", []))
-        result: QuerySpecification = await self._ainvoke_with_retry(
+        result: QuerySpecification = await self._ainvoke_with_parser(
             chain=chain,
+            parser=parser,
             payload={
                 "doc_source": state.get("doc_source", "unknown document"),
                 "headings": headings_text,
@@ -217,7 +432,10 @@ class AgenticGraphRunner:
             limiter=self.query_rate_limiter,
             model_label="query_model",
             max_retries=int(os.getenv("GEMINI_MAX_RETRIES", "3")),
+            parse_label="query_agent",
+            log_context={"doc_source": state.get("doc_source")},
         )
+        self._emit_llm_status(step="query_agent", doc_source=state.get("doc_source"))
         await self._log_event(
             "query_agent",
             {
@@ -275,6 +493,150 @@ class AgenticGraphRunner:
 
         return [best_by_location[key] for key in order]
 
+    @staticmethod
+    def _normalize_text(text: str) -> str:
+        return " ".join(text.split())
+
+    @staticmethod
+    def _trim_text(text: str, max_chars: int) -> str:
+        if max_chars <= 0 or len(text) <= max_chars:
+            return text
+        return text[:max_chars].rstrip() + "..."
+
+    @classmethod
+    def _prepare_chunks_for_distillation(
+        cls,
+        rows: List[Dict[str, Any]],
+        max_chunk_chars: int,
+    ) -> List[Dict[str, Any]]:
+        prepared: List[Dict[str, Any]] = []
+        for row in rows:
+            raw_text = row.get("text") or ""
+            normalized = cls._normalize_text(raw_text)
+            trimmed = cls._trim_text(normalized, max_chunk_chars)
+            prepared.append(
+                {
+                    "chunk_id": row.get("chunk_id"),
+                    "source": row.get("source"),
+                    "page": row.get("page"),
+                    "parent_heading": row.get("parent_heading"),
+                    "text": trimmed,
+                }
+            )
+        return prepared
+
+    @staticmethod
+    def _batch_by_char_budget(rows: List[Dict[str, Any]], char_budget: int) -> List[List[Dict[str, Any]]]:
+        if not rows:
+            return []
+        if char_budget <= 0:
+            return [rows]
+        batches: List[List[Dict[str, Any]]] = []
+        current: List[Dict[str, Any]] = []
+        current_size = 0
+        for row in rows:
+            text_size = len(row.get("text") or "")
+            entry_size = text_size + 200
+            if current and current_size + entry_size > char_budget:
+                batches.append(current)
+                current = []
+                current_size = 0
+            current.append(row)
+            current_size += entry_size
+        if current:
+            batches.append(current)
+        return batches
+
+    @staticmethod
+    def _split_batches_by_count(batches: List[List[Dict[str, Any]]], max_chunks: int) -> List[List[Dict[str, Any]]]:
+        if max_chunks <= 0:
+            return batches
+        split: List[List[Dict[str, Any]]] = []
+        for batch in batches:
+            if len(batch) <= max_chunks:
+                split.append(batch)
+                continue
+            for start in range(0, len(batch), max_chunks):
+                split.append(batch[start:start + max_chunks])
+        return split
+
+    @staticmethod
+    def _should_split_distill_error(exc: Exception) -> bool:
+        message = str(exc)
+        indicators = (
+            "Invalid JSON",
+            "EOF while parsing",
+            "JSONDecodeError",
+            "model_validate_json",
+            "parse",
+            "ValidationError",
+        )
+        return any(indicator in message for indicator in indicators)
+
+    @staticmethod
+    def _first_sentence(text: str) -> str:
+        if not text:
+            return ""
+        for sep in (". ", "? ", "! "):
+            if sep in text:
+                return text.split(sep, 1)[0].strip() + sep.strip()
+        return text.strip()
+
+    def _fallback_evidence_cards_from_chunks(self, batch: List[Dict[str, Any]]) -> List[EvidenceCard]:
+        cards: List[EvidenceCard] = []
+        for row in batch:
+            raw_text = self._normalize_text(row.get("text") or "")
+            summary = self._trim_text(self._first_sentence(raw_text), 240)
+            support = self._trim_text(raw_text, 360)
+            cards.append(
+                EvidenceCard(
+                    origin="document",
+                    claim=summary or support or "Evidence extracted from document.",
+                    source=row.get("source") or "document",
+                    page=row.get("page"),
+                    chunk_id=row.get("chunk_id"),
+                    certainty="low",
+                    support=support or None,
+                )
+            )
+        return cards
+
+    @staticmethod
+    def _dedupe_evidence_cards(cards: List[EvidenceCard]) -> List[EvidenceCard]:
+        seen: set[tuple] = set()
+        deduped: List[EvidenceCard] = []
+        for card in cards:
+            key = (
+                card.origin,
+                card.source,
+                card.page,
+                card.chunk_id,
+                card.claim.strip().lower(),
+            )
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped.append(card)
+        return deduped
+
+    @staticmethod
+    def _web_context_to_evidence(web_context: List[Dict[str, Any]]) -> List[EvidenceCard]:
+        cards: List[EvidenceCard] = []
+        for row in web_context:
+            summary = (row.get("summary") or "").strip()
+            if not summary:
+                continue
+            cards.append(
+                EvidenceCard(
+                    origin="web",
+                    claim=summary,
+                    source=row.get("href") or row.get("title") or "web",
+                    certainty="medium",
+                    support=(row.get("snippet") or "").strip() or None,
+                )
+            )
+        return cards
+
     async def _context_node(
         self,
         state: AgenticState,
@@ -303,9 +665,10 @@ class AgenticGraphRunner:
                 ),
             ]
         )
-        chain = prompt | self.query_model | parser
-        assessment: ContextAssessment = await self._ainvoke_with_retry(
+        chain = prompt | self.query_model
+        assessment: ContextAssessment = await self._ainvoke_with_parser(
             chain=chain,
+            parser=parser,
             payload={
                 "summary": state.get("document_summary", ""),
                 "doc_type": state.get("document_type", "unknown"),
@@ -316,7 +679,10 @@ class AgenticGraphRunner:
             limiter=self.query_rate_limiter,
             model_label="query_model",
             max_retries=int(os.getenv("GEMINI_MAX_RETRIES", "3")),
+            parse_label="context_assessment",
+            log_context={"doc_source": state.get("doc_source")},
         )
+        self._emit_llm_status(step="context_assessment", doc_source=state.get("doc_source"))
         await self._log_event(
             "context_assessment",
             {
@@ -330,10 +696,10 @@ class AgenticGraphRunner:
         )
 
         web_context: List[Dict] = []
-        if assessment.needs_additional_context:
+        if assessment.needs_additional_context and self.web_search_enabled and self.max_web_queries_per_doc > 0:
             if status_callback:
                 status_callback("Shortlisting web sources", 0.85)
-            for query in assessment.missing_information_queries[:3]:
+            for query in assessment.missing_information_queries[: self.max_web_queries_per_doc]:
                 payload = await self.mcp_client.call_tool(
                     "web_search",
                     {"query": query, "num_results": 5, "include_content": False},
@@ -362,6 +728,7 @@ class AgenticGraphRunner:
                     document_summary=state.get("document_summary", ""),
                     document_type=state.get("document_type", "unknown"),
                     candidates=candidates,
+                    doc_source=state.get("doc_source"),
                 )
                 await self._log_event(
                     "web_candidate_screen",
@@ -394,6 +761,7 @@ class AgenticGraphRunner:
                         content=content,
                         document_summary=state.get("document_summary", ""),
                         document_type=state.get("document_type", "unknown"),
+                        doc_source=state.get("doc_source"),
                     )
 
                     if not content_decision.include:
@@ -430,8 +798,198 @@ class AgenticGraphRunner:
                         },
                     )
                     web_context.append(result.model_dump())
+        elif assessment.needs_additional_context and not self.web_search_enabled:
+            await self._log_event(
+                "web_search_skipped",
+                {
+                    "doc_source": state.get("doc_source"),
+                    "reason": "disabled",
+                    "missing_queries": assessment.missing_information_queries,
+                },
+            )
+        elif assessment.needs_additional_context and self.max_web_queries_per_doc <= 0:
+            await self._log_event(
+                "web_search_skipped",
+                {
+                    "doc_source": state.get("doc_source"),
+                    "reason": "max_queries_zero",
+                    "missing_queries": assessment.missing_information_queries,
+                },
+            )
 
         return {"web_context": web_context}
+
+    async def _distill_evidence_node(
+        self,
+        state: AgenticState,
+        status_callback: Optional[Callable[[str, float], None]] = None,
+    ) -> AgenticState:
+        retrieval_chunks = state.get("retrieval_results", [])
+        web_context = state.get("web_context", [])
+        if not retrieval_chunks and not web_context:
+            return {"evidence_cards": []}
+
+        char_budget = int(os.getenv("EVIDENCE_DISTILL_CHAR_BUDGET", "12000"))
+        max_chunk_chars = int(os.getenv("EVIDENCE_DISTILL_MAX_CHUNK_CHARS", "4000"))
+        max_chunks_per_batch = int(os.getenv("EVIDENCE_DISTILL_MAX_CHUNKS_PER_BATCH", "0"))
+
+        prepared_chunks = self._prepare_chunks_for_distillation(retrieval_chunks, max_chunk_chars)
+        batches = self._batch_by_char_budget(prepared_chunks, char_budget)
+        batches = self._split_batches_by_count(batches, max_chunks_per_batch)
+
+        parser = PydanticOutputParser(pydantic_object=EvidenceDigest)
+        format_instructions = parser.get_format_instructions()
+        prompt = ChatPromptTemplate.from_messages(
+            [
+                (
+                    "system",
+                    "You are an evidence distiller for regulatory compliance."
+                    " Extract atomic obligation statements from each chunk."
+                    " Each card must be grounded in the provided chunk text."
+                    " Return only the claims that represent concrete obligations, thresholds, timelines, or reporting duties."
+                    " Keep each claim to one short sentence."
+                    " Set `origin` to `document` for every card."
+                    " Use certainty tags: high, medium, or low.",
+                ),
+                (
+                    "human",
+                    "Document: {doc}\nDocument type: {doc_type}\n"
+                    "Chunks (JSON list): {chunks}\n\n{format_instructions}",
+                ),
+            ]
+        )
+        structured = self._build_structured_chain(self.query_model, EvidenceDigest)
+        structured_chain = prompt | structured if structured else None
+        base_chain = prompt | self.query_model
+
+        distilled_cards: List[EvidenceCard] = []
+        total_batches = max(1, len(batches))
+
+        async def distill_batch(batch: List[Dict[str, Any]], label: str) -> List[EvidenceCard]:
+            payload = {
+                "doc": state.get("doc_source"),
+                "doc_type": state.get("document_type", "unknown"),
+                "chunks": json.dumps(batch),
+                "format_instructions": format_instructions,
+            }
+            try:
+                if structured_chain:
+                    response = await self._ainvoke_with_retry(
+                        chain=structured_chain,
+                        payload=payload,
+                        limiter=self.query_rate_limiter,
+                        model_label="query_model",
+                        max_retries=int(os.getenv("GEMINI_MAX_RETRIES", "3")),
+                    )
+                    parsed = response.get("parsed") if isinstance(response, dict) else None
+                    if parsed is None:
+                        parsing_error = response.get("parsing_error") if isinstance(response, dict) else None
+                        await self._log_event(
+                            "evidence_distill_parse_error",
+                            {
+                                "doc_source": state.get("doc_source"),
+                                "batch": label,
+                                "error": str(parsing_error) if parsing_error else "Structured output missing",
+                            },
+                        )
+                        parsed = await self._ainvoke_with_parser(
+                            chain=base_chain,
+                            parser=parser,
+                            payload=payload,
+                            limiter=self.query_rate_limiter,
+                            model_label="query_model",
+                            max_retries=int(os.getenv("GEMINI_MAX_RETRIES", "3")),
+                            parse_label="evidence_distill",
+                            log_context={"doc_source": state.get("doc_source")},
+                        )
+                    digest = await self._coerce_model_output(
+                        parsed,
+                        EvidenceDigest,
+                        parse_label="evidence_distill",
+                        log_context={"doc_source": state.get("doc_source")},
+                    )
+                else:
+                    digest = await self._ainvoke_with_parser(
+                        chain=base_chain,
+                        parser=parser,
+                        payload=payload,
+                        limiter=self.query_rate_limiter,
+                        model_label="query_model",
+                        max_retries=int(os.getenv("GEMINI_MAX_RETRIES", "3")),
+                        parse_label="evidence_distill",
+                        log_context={"doc_source": state.get("doc_source")},
+                    )
+            except Exception as exc:
+                if structured_chain:
+                    await self._log_event(
+                        "evidence_distill_structured_failure",
+                        {
+                            "doc_source": state.get("doc_source"),
+                            "batch": label,
+                            "error": str(exc),
+                        },
+                    )
+                    try:
+                        digest = await self._ainvoke_with_parser(
+                            chain=base_chain,
+                            parser=parser,
+                            payload=payload,
+                            limiter=self.query_rate_limiter,
+                            model_label="query_model",
+                            max_retries=int(os.getenv("GEMINI_MAX_RETRIES", "3")),
+                            parse_label="evidence_distill",
+                            log_context={"doc_source": state.get("doc_source")},
+                        )
+                        self._emit_llm_status(
+                            step="evidence_distill",
+                            doc_source=state.get("doc_source"),
+                            detail=f"{label} (fallback)",
+                        )
+                        return digest.cards or []
+                    except Exception as fallback_exc:
+                        exc = fallback_exc
+                if len(batch) > 1 and self._should_split_distill_error(exc):
+                    mid = len(batch) // 2
+                    left = await distill_batch(batch[:mid], f"{label}.1")
+                    right = await distill_batch(batch[mid:], f"{label}.2")
+                    return left + right
+                await self._log_event(
+                    "evidence_distill_fallback",
+                    {
+                        "doc_source": state.get("doc_source"),
+                        "batch": label,
+                        "error": str(exc),
+                        "strategy": "heuristic_cards",
+                    },
+                )
+                return self._fallback_evidence_cards_from_chunks(batch)
+
+            self._emit_llm_status(
+                step="evidence_distill",
+                doc_source=state.get("doc_source"),
+                detail=label,
+            )
+            return digest.cards or []
+
+        for idx, batch in enumerate(batches, start=1):
+            if status_callback:
+                status_callback(f"Distilling evidence ({idx}/{total_batches})", 0.82)
+            distilled_cards.extend(await distill_batch(batch, f"batch {idx}/{total_batches}"))
+
+        web_cards = self._web_context_to_evidence(web_context)
+        combined_cards = self._dedupe_evidence_cards(distilled_cards + web_cards)
+
+        await self._log_event(
+            "evidence_distilled",
+            {
+                "doc_source": state.get("doc_source"),
+                "retrieval_count": len(retrieval_chunks),
+                "batch_count": len(batches),
+                "card_count": len(combined_cards),
+                "web_card_count": len(web_cards),
+            },
+        )
+        return {"evidence_cards": [card.model_dump() for card in combined_cards]}
 
     async def _screen_web_candidates(
         self,
@@ -440,6 +998,7 @@ class AgenticGraphRunner:
         document_summary: str,
         document_type: str,
         candidates: List[WebSourceCandidate],
+        doc_source: Optional[str] = None,
     ) -> List[WebSourceSelection]:
         parser = PydanticOutputParser(pydantic_object=WebSelectionResponse)
         format_instructions = parser.get_format_instructions()
@@ -458,11 +1017,12 @@ class AgenticGraphRunner:
                 ),
             ]
         )
-        chain = prompt | self.query_model | parser
+        chain = prompt | self.query_model
         summary_snippet = (document_summary or "")[:80]
         try:
-            response: WebSelectionResponse = await self._ainvoke_with_retry(
+            response: WebSelectionResponse = await self._ainvoke_with_parser(
                 chain=chain,
+                parser=parser,
                 payload={
                     "summary": document_summary,
                     "doc_type": document_type,
@@ -473,6 +1033,13 @@ class AgenticGraphRunner:
                 limiter=self.query_rate_limiter,
                 model_label="query_model",
                 max_retries=int(os.getenv("GEMINI_MAX_RETRIES", "3")),
+                parse_label="web_candidate_screen",
+                log_context={"doc_source": summary_snippet, "query": query},
+            )
+            self._emit_llm_status(
+                step="web_candidate_screen",
+                doc_source=doc_source,
+                detail=query[:120] if query else None,
             )
             return response.selections or []
         except OutputParserException as exc:
@@ -512,6 +1079,7 @@ class AgenticGraphRunner:
         content: str,
         document_summary: str,
         document_type: str,
+        doc_source: Optional[str] = None,
     ) -> WebContentDecision:
         parser = PydanticOutputParser(pydantic_object=WebContentDecision)
         format_instructions = parser.get_format_instructions()
@@ -530,9 +1098,10 @@ class AgenticGraphRunner:
                 ),
             ]
         )
-        chain = prompt | self.query_model | parser
-        decision: WebContentDecision = await self._ainvoke_with_retry(
+        chain = prompt | self.query_model
+        decision: WebContentDecision = await self._ainvoke_with_parser(
             chain=chain,
+            parser=parser,
             payload={
                 "summary": document_summary,
                 "doc_type": document_type,
@@ -546,10 +1115,21 @@ class AgenticGraphRunner:
             limiter=self.query_rate_limiter,
             model_label="query_model",
             max_retries=int(os.getenv("GEMINI_MAX_RETRIES", "3")),
+            parse_label="web_content_decision",
+            log_context={"doc_source": document_summary[:80], "query": query},
+        )
+        self._emit_llm_status(
+            step="web_content_eval",
+            doc_source=doc_source,
+            detail=candidate.href or candidate.title,
         )
         return decision
 
-    async def _requirements_node(self, state: AgenticState) -> AgenticState:
+    async def _requirements_node(
+        self,
+        state: AgenticState,
+        status_callback: Optional[Callable[[str, float], None]] = None,
+    ) -> AgenticState:
         parser = PydanticOutputParser(pydantic_object=RequirementBundle)
         format_instructions = parser.get_format_instructions()
         prompt = ChatPromptTemplate.from_messages(
@@ -557,39 +1137,120 @@ class AgenticGraphRunner:
                 (
                     "system",
                     "You are Agent 2, a senior regulatory implementation architect for ING Bank."
-                    " Use the retrieved document chunks (and any enriched web context) to translate legal obligations into actionable business and data requirements."
+                    " Use the distilled evidence cards to translate legal obligations into actionable business and data requirements."
                     " Address governance, risk management, assurance, reporting formats, and data collection duties relevant to lending, investment, and underwriting activities."
                     " Cite chunk IDs/pages for every document-driven statement and include online citations whenever external context informed the requirement."
-                    " Format every entry in `document_sources` exactly as `{{source}}, page {{page_number}}, chunk {{chunk_id}}` using the values from the provided retrieval chunks."
+                    " Format every entry in `document_sources` exactly as `{{source}}, page {{page_number}}, chunk {{chunk_id}}` using the values from the evidence cards."
                     " If a page number is missing, write `page unknown` but always keep the chunk identifier in the same format."
+                    " Evidence cards with origin `web` should be cited in `online_sources` using their `source` value."
                     " Respond strictly with the JSON schema described in the instructions so downstream systems can ingest your output.",
                 ),
                 (
                     "human",
-                    "Document: {doc}\nType: {doc_type}\nSummary: {summary}\n\nContext from retrieval: {chunks}\n\n"
-                    "Online insights: {web}\n\n{format_instructions}",
+                    "Document: {doc}\nType: {doc_type}\nSummary: {summary}\n\nEvidence cards: {evidence}\n\n"
+                    "{format_instructions}",
                 ),
             ]
         )
-        chain = prompt | self.requirements_model | parser
+        structured = self._build_structured_chain(self.requirements_model, RequirementBundle)
+        chain = prompt | (structured or self.requirements_model)
 
-        chunk_text = json.dumps(state.get("retrieval_results", []))
-        web_text = json.dumps(state.get("web_context", []))
+        evidence_cards = state.get("evidence_cards")
+        if not evidence_cards:
+            evidence_cards = [
+                {
+                    "origin": "document",
+                    "claim": self._trim_text(self._normalize_text(row.get("text") or ""), 600),
+                    "source": row.get("source"),
+                    "page": row.get("page"),
+                    "chunk_id": row.get("chunk_id"),
+                    "certainty": "low",
+                }
+                for row in state.get("retrieval_results", [])
+            ]
+            evidence_cards.extend(
+                [card.model_dump() for card in self._web_context_to_evidence(state.get("web_context", []))]
+            )
+        evidence_text = json.dumps(evidence_cards)
 
-        bundle: RequirementBundle = await self._ainvoke_with_retry(
-            chain=chain,
-            payload={
-                "doc": state.get("doc_source"),
-                "doc_type": state.get("document_type", "unknown"),
-                "summary": state.get("document_summary", ""),
-                "chunks": chunk_text,
-                "web": web_text,
-                "format_instructions": format_instructions,
-            },
-            limiter=self.requirements_rate_limiter,
-            model_label="requirements_model",
-            max_retries=int(os.getenv("GEMINI_MAX_RETRIES", "3")),
-        )
+        if status_callback:
+            status_callback("Drafting requirement bundle", 0.2)
+        if structured:
+            response = None
+            try:
+                response = await self._ainvoke_with_retry(
+                    chain=chain,
+                    payload={
+                        "doc": state.get("doc_source"),
+                        "doc_type": state.get("document_type", "unknown"),
+                        "summary": state.get("document_summary", ""),
+                        "evidence": evidence_text,
+                        "format_instructions": format_instructions,
+                    },
+                    limiter=self.requirements_rate_limiter,
+                    model_label="requirements_model",
+                    max_retries=int(os.getenv("GEMINI_MAX_RETRIES", "3")),
+                )
+            except Exception as exc:
+                await self._log_event(
+                    "requirements_structured_failure",
+                    {
+                        "doc_source": state.get("doc_source"),
+                        "error": str(exc),
+                    },
+                )
+            parsed = response.get("parsed") if isinstance(response, dict) else None
+            if parsed is None:
+                parsing_error = response.get("parsing_error") if isinstance(response, dict) else None
+                await self._log_event(
+                    "requirements_parse_error",
+                    {
+                        "doc_source": state.get("doc_source"),
+                        "error": str(parsing_error) if parsing_error else "Structured output missing",
+                    },
+                )
+                parsed = await self._ainvoke_with_parser(
+                    chain=prompt | self.requirements_model,
+                    parser=parser,
+                    payload={
+                        "doc": state.get("doc_source"),
+                        "doc_type": state.get("document_type", "unknown"),
+                        "summary": state.get("document_summary", ""),
+                        "evidence": evidence_text,
+                        "format_instructions": format_instructions,
+                    },
+                    limiter=self.requirements_rate_limiter,
+                    model_label="requirements_model",
+                    max_retries=int(os.getenv("GEMINI_MAX_RETRIES", "3")),
+                    parse_label="requirements",
+                    log_context={"doc_source": state.get("doc_source")},
+                )
+            bundle = await self._coerce_model_output(
+                parsed,
+                RequirementBundle,
+                parse_label="requirements",
+                log_context={"doc_source": state.get("doc_source")},
+            )
+        else:
+            bundle = await self._ainvoke_with_parser(
+                chain=chain,
+                parser=parser,
+                payload={
+                    "doc": state.get("doc_source"),
+                    "doc_type": state.get("document_type", "unknown"),
+                    "summary": state.get("document_summary", ""),
+                    "evidence": evidence_text,
+                    "format_instructions": format_instructions,
+                },
+                limiter=self.requirements_rate_limiter,
+                model_label="requirements_model",
+                max_retries=int(os.getenv("GEMINI_MAX_RETRIES", "3")),
+                parse_label="requirements",
+                log_context={"doc_source": state.get("doc_source")},
+            )
+        self._emit_llm_status(step="requirements_draft", doc_source=state.get("doc_source"))
+        if status_callback:
+            status_callback("Validating requirement bundle", 0.85)
         await self._log_event(
             "requirements",
             {
@@ -622,37 +1283,101 @@ class AgenticGraphRunner:
                     " Elevate actionability: spell out concrete owner actions, controls, data flows, and timing so a reporting team can operationalize the requirement in the bank's yearly report."
                     " Strengthen coherence by explaining how requirements interact or build on one another, flagging dependencies or sequencing when relevant."
                     " Use richer detail where the source material allows (e.g., explicit thresholds, scenario coverage, assurance cadence) without inventing unsupported facts."
-                    " Ensure every change is grounded in the provided retrieval chunks or online context, citing them in the same format as before, and highlight why the refinement improves usefulness for the reporting audience."
+                    " Ensure every change is grounded in the provided evidence cards, citing them in the same format as before, and highlight why the refinement improves usefulness for the reporting audience."
                     " Respond strictly with the JSON schema described in the instructions so downstream systems can ingest your output.",
                 ),
                 (
                     "human",
                     "Document: {doc}\nType: {doc_type}\nSummary: {summary}\n\n"
-                    "Prior requirements bundle: {existing}\n\nRetrieved chunks: {chunks}\n\nOnline insights: {web}\n\n{format_instructions}",
+                    "Prior requirements bundle: {existing}\n\nEvidence cards: {evidence}\n\n{format_instructions}",
                 ),
             ]
         )
-        chain = prompt | self.requirements_model | parser
+        structured = self._build_structured_chain(self.requirements_model, RequirementBundle)
+        chain = prompt | (structured or self.requirements_model)
 
-        chunk_text = json.dumps(state.get("retrieval_results", []))
-        web_text = json.dumps(state.get("web_context", []))
+        evidence_text = json.dumps(state.get("evidence_cards", []))
+        if not evidence_text or evidence_text == "[]":
+            evidence_text = json.dumps(state.get("retrieval_results", []))
         existing_text = json.dumps(prior_bundle.model_dump())
 
-        refined_bundle: RequirementBundle = await self._ainvoke_with_retry(
-            chain=chain,
-            payload={
-                "doc": state.get("doc_source"),
-                "doc_type": state.get("document_type", "unknown"),
-                "summary": state.get("document_summary", ""),
-                "existing": existing_text,
-                "chunks": chunk_text,
-                "web": web_text,
-                "format_instructions": format_instructions,
-            },
-            limiter=self.requirements_rate_limiter,
-            model_label="requirements_model",
-            max_retries=int(os.getenv("GEMINI_MAX_RETRIES", "3")),
-        )
+        if structured:
+            response = None
+            try:
+                response = await self._ainvoke_with_retry(
+                    chain=chain,
+                    payload={
+                        "doc": state.get("doc_source"),
+                        "doc_type": state.get("document_type", "unknown"),
+                        "summary": state.get("document_summary", ""),
+                        "existing": existing_text,
+                        "evidence": evidence_text,
+                        "format_instructions": format_instructions,
+                    },
+                    limiter=self.requirements_rate_limiter,
+                    model_label="requirements_model",
+                    max_retries=int(os.getenv("GEMINI_MAX_RETRIES", "3")),
+                )
+            except Exception as exc:
+                await self._log_event(
+                    "requirements_refinement_structured_failure",
+                    {
+                        "doc_source": state.get("doc_source"),
+                        "error": str(exc),
+                    },
+                )
+            parsed = response.get("parsed") if isinstance(response, dict) else None
+            if parsed is None:
+                parsing_error = response.get("parsing_error") if isinstance(response, dict) else None
+                await self._log_event(
+                    "requirements_refinement_parse_error",
+                    {
+                        "doc_source": state.get("doc_source"),
+                        "error": str(parsing_error) if parsing_error else "Structured output missing",
+                    },
+                )
+                parsed = await self._ainvoke_with_parser(
+                    chain=prompt | self.requirements_model,
+                    parser=parser,
+                    payload={
+                        "doc": state.get("doc_source"),
+                        "doc_type": state.get("document_type", "unknown"),
+                        "summary": state.get("document_summary", ""),
+                        "existing": existing_text,
+                        "evidence": evidence_text,
+                        "format_instructions": format_instructions,
+                    },
+                    limiter=self.requirements_rate_limiter,
+                    model_label="requirements_model",
+                    max_retries=int(os.getenv("GEMINI_MAX_RETRIES", "3")),
+                    parse_label="requirements_refinement",
+                    log_context={"doc_source": state.get("doc_source")},
+                )
+            refined_bundle = await self._coerce_model_output(
+                parsed,
+                RequirementBundle,
+                parse_label="requirements_refinement",
+                log_context={"doc_source": state.get("doc_source")},
+            )
+        else:
+            refined_bundle = await self._ainvoke_with_parser(
+                chain=chain,
+                parser=parser,
+                payload={
+                    "doc": state.get("doc_source"),
+                    "doc_type": state.get("document_type", "unknown"),
+                    "summary": state.get("document_summary", ""),
+                    "existing": existing_text,
+                    "evidence": evidence_text,
+                    "format_instructions": format_instructions,
+                },
+                limiter=self.requirements_rate_limiter,
+                model_label="requirements_model",
+                max_retries=int(os.getenv("GEMINI_MAX_RETRIES", "3")),
+                parse_label="requirements_refinement",
+                log_context={"doc_source": state.get("doc_source")},
+            )
+        self._emit_llm_status(step="requirements_refine", doc_source=state.get("doc_source"))
         await self._log_event(
             "requirements_refinement",
             {
@@ -694,10 +1419,129 @@ class AgenticGraphRunner:
 
         return state
 
-    async def generate_requirements(self, state: AgenticState) -> AgenticState:
+    async def distill_evidence(
+        self,
+        state: AgenticState,
+        status_callback: Optional[Callable[[str, float], None]] = None,
+    ) -> AgenticState:
+        """Distill retrieval chunks into compact evidence cards."""
+
+        return await self._distill_evidence_node(state, status_callback=status_callback)
+
+    async def generate_requirements(
+        self,
+        state: AgenticState,
+        status_callback: Optional[Callable[[str, float], None]] = None,
+    ) -> AgenticState:
         """Invoke only the requirements node with the provided state."""
 
-        return await self._requirements_node(state)
+        return await self._requirements_node(state, status_callback=status_callback)
+
+    async def merge_requirements(
+        self,
+        bundles: List[RequirementBundle],
+        doc_sources: List[str],
+        status_callback: Optional[Callable[[str, float], None]] = None,
+    ) -> RequirementBundle:
+        """Merge per-document requirement bundles into a consolidated bundle."""
+
+        parser = PydanticOutputParser(pydantic_object=RequirementBundle)
+        format_instructions = parser.get_format_instructions()
+        prompt = ChatPromptTemplate.from_messages(
+            [
+                (
+                    "system",
+                    "You are consolidating multiple requirement bundles produced from individual regulatory documents."
+                    " Merge overlapping requirements, preserve citations, and produce a single coherent bundle."
+                    " Reindex business requirements as BR-001, BR-002... and data requirements as DR-001, DR-002..."
+                    " Keep document_sources and online_sources as arrays, merging citations when requirements overlap."
+                    " Produce a deduplicated assumptions list.",
+                ),
+                (
+                    "human",
+                    "Documents: {docs}\n\nPer-document bundles (JSON list): {bundles}\n\n{format_instructions}",
+                ),
+            ]
+        )
+        structured = self._build_structured_chain(self.requirements_model, RequirementBundle)
+        chain = prompt | (structured or self.requirements_model)
+
+        if status_callback:
+            status_callback("Merging requirement bundles", 0.4)
+
+        payload = {
+            "docs": ", ".join(doc_sources) if doc_sources else "unknown",
+            "bundles": json.dumps([bundle.model_dump() for bundle in bundles]),
+            "format_instructions": format_instructions,
+        }
+        if structured:
+            response = None
+            try:
+                response = await self._ainvoke_with_retry(
+                    chain=chain,
+                    payload=payload,
+                    limiter=self.requirements_rate_limiter,
+                    model_label="requirements_model",
+                    max_retries=int(os.getenv("GEMINI_MAX_RETRIES", "3")),
+                )
+            except Exception as exc:
+                await self._log_event(
+                    "requirements_merge_structured_failure",
+                    {
+                        "doc_source": ",".join(doc_sources),
+                        "error": str(exc),
+                    },
+                )
+            parsed = response.get("parsed") if isinstance(response, dict) else None
+            if parsed is None:
+                parsing_error = response.get("parsing_error") if isinstance(response, dict) else None
+                await self._log_event(
+                    "requirements_merge_parse_error",
+                    {
+                        "doc_source": ",".join(doc_sources),
+                        "error": str(parsing_error) if parsing_error else "Structured output missing",
+                    },
+                )
+                parsed = await self._ainvoke_with_parser(
+                    chain=prompt | self.requirements_model,
+                    parser=parser,
+                    payload=payload,
+                    limiter=self.requirements_rate_limiter,
+                    model_label="requirements_model",
+                    max_retries=int(os.getenv("GEMINI_MAX_RETRIES", "3")),
+                    parse_label="requirements_merge",
+                    log_context={"doc_source": ",".join(doc_sources)},
+                )
+            merged_bundle = await self._coerce_model_output(
+                parsed,
+                RequirementBundle,
+                parse_label="requirements_merge",
+                log_context={"doc_source": ",".join(doc_sources)},
+            )
+        else:
+            merged_bundle = await self._ainvoke_with_parser(
+                chain=chain,
+                parser=parser,
+                payload=payload,
+                limiter=self.requirements_rate_limiter,
+                model_label="requirements_model",
+                max_retries=int(os.getenv("GEMINI_MAX_RETRIES", "3")),
+                parse_label="requirements_merge",
+                log_context={"doc_source": ",".join(doc_sources)},
+            )
+
+        self._emit_llm_status(step="requirements_merge", doc_source=",".join(doc_sources))
+        await self._log_event(
+            "requirements_merge",
+            {
+                "doc_source": ",".join(doc_sources),
+                "bundle_count": len(bundles),
+                "business_requirement_count": len(merged_bundle.business_requirements),
+                "data_requirement_count": len(merged_bundle.data_requirements),
+                "assumption_count": len(merged_bundle.assumptions),
+            },
+        )
+        return merged_bundle
 
     async def _log_event(self, event_type: str, payload: Dict[str, Any]) -> None:
         if not self.decision_logger:
