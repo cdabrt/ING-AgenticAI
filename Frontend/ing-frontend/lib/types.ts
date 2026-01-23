@@ -13,4 +13,7 @@ export interface RequirementBundle {
     business_requirements: RequirementItem[];
     data_requirements: RequirementItem[];
     assumptions: string[];
+    run_id?: string;
+    run_started_at?: string;
+    run_completed_at?: string;
 }

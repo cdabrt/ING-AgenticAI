@@ -8,6 +8,7 @@ import re
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Dict, List, Optional
+from uuid import uuid4
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import Response
@@ -22,6 +23,7 @@ app = FastAPI()
 DATA_DIR = Path(os.getenv("DATA_DIR", "data"))
 VECTOR_DIR = os.getenv("VECTOR_STORE_DIR", "artifacts/vector_store")
 OUTPUT_PATH = Path(os.getenv("REQUIREMENTS_OUTPUT", "artifacts/requirements.json"))
+LATEST_OUTPUT_PATH = Path(os.getenv("REQUIREMENTS_LATEST_OUTPUT", "artifacts/requirements_latest.json"))
 PDF_OUTPUT = os.getenv("REQUIREMENTS_PDF_OUTPUT", "artifacts/requirements.pdf")
 DECISION_LOG = os.getenv("DECISION_LOG_PATH", "artifacts/agent_decisions.jsonl")
 SERVER_SCRIPT = str(Path(__file__).resolve().parent / "mcp_servers" / "regulation_server.py")
@@ -302,6 +304,8 @@ async def run_pipeline_endpoint(payload: PipelinePayload | None = None):
         started_at=_now_iso(),
     )
 
+    existing_bundles = _load_requirement_bundles()
+
     async with PIPELINE_LOCK:
         args = SimpleNamespace(
             data_dir=str(DATA_DIR),
@@ -309,7 +313,7 @@ async def run_pipeline_endpoint(payload: PipelinePayload | None = None):
             server_script=SERVER_SCRIPT,
             rebuild_store=False,
             top_k=int(os.getenv("RETRIEVAL_TOP_K", "15")),
-            output=str(OUTPUT_PATH),
+            output=str(LATEST_OUTPUT_PATH),
             pdf_output=PDF_OUTPUT,
             decision_log=DECISION_LOG,
             throttle_enabled=_parse_optional_bool(os.getenv("PIPELINE_THROTTLE_ENABLED")) or False,
@@ -352,7 +356,36 @@ async def run_pipeline_endpoint(payload: PipelinePayload | None = None):
 
     _update_status(state="completed", stage="complete", message="Pipeline finished", progress=1.0)
 
-    return _load_requirement_bundles()
+    new_payload = []
+    if LATEST_OUTPUT_PATH.exists():
+        try:
+            with LATEST_OUTPUT_PATH.open("r", encoding="utf-8") as handle:
+                latest = json.load(handle)
+            if isinstance(latest, list):
+                new_payload = latest
+            else:
+                new_payload = [latest]
+        except json.JSONDecodeError as exc:
+            raise HTTPException(status_code=500, detail=f"Invalid latest requirements JSON: {exc}") from exc
+    elif OUTPUT_PATH.exists():
+        new_payload = _load_requirement_bundles()
+    run_id = uuid4().hex
+    run_started_at = PIPELINE_STATUS.get("started_at") or _now_iso()
+    run_completed_at = _now_iso()
+    enriched_payload = []
+    for bundle in new_payload:
+        if isinstance(bundle, dict):
+            bundle.setdefault("run_id", run_id)
+            bundle.setdefault("run_started_at", run_started_at)
+            bundle.setdefault("run_completed_at", run_completed_at)
+        enriched_payload.append(bundle)
+
+    combined = existing_bundles + enriched_payload
+    OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with OUTPUT_PATH.open("w", encoding="utf-8") as handle:
+        json.dump(combined, handle, indent=2)
+
+    return combined
 
 
 @app.get("/api/pipeline/status")

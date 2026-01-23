@@ -56,6 +56,11 @@ export default function RequirementBundleList({ data, onRowClick }: RequirementB
                             <span>{bundle.business_requirements.length} business</span>
                             <span>{bundle.data_requirements.length} data</span>
                             <span>{bundle.assumptions.length} assumptions</span>
+                            {bundle.run_completed_at && (
+                                <span className="text-[10px] text-zinc-400">
+                                    {new Date(bundle.run_completed_at).toLocaleString()}
+                                </span>
+                            )}
                         </div>
                     </button>
                 )

@@ -12,10 +12,12 @@ def app_client(tmp_path, monkeypatch):
     data_dir = tmp_path / "data"
     data_dir.mkdir()
     output_path = tmp_path / "artifacts" / "requirements.json"
+    latest_output_path = tmp_path / "artifacts" / "requirements_latest.json"
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     monkeypatch.setenv("DATA_DIR", str(data_dir))
     monkeypatch.setenv("REQUIREMENTS_OUTPUT", str(output_path))
+    monkeypatch.setenv("REQUIREMENTS_LATEST_OUTPUT", str(latest_output_path))
     monkeypatch.setenv("VECTOR_STORE_DIR", str(tmp_path / "vector_store"))
     monkeypatch.setenv("VECTOR_STORE_BACKEND", "faiss")
     monkeypatch.setenv("REQUIREMENTS_PDF_OUTPUT", str(tmp_path / "artifacts" / "requirements.pdf"))
@@ -107,8 +109,9 @@ def test_pipeline_endpoint_writes_output(app_client, monkeypatch):
     client, app_module, data_dir, output_path = app_client
 
     async def fake_run_pipeline(args, progress_callback=None):
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        with output_path.open("w", encoding="utf-8") as handle:
+        latest_path = Path(args.output)
+        latest_path.parent.mkdir(parents=True, exist_ok=True)
+        with latest_path.open("w", encoding="utf-8") as handle:
             json.dump(
                 [
                     {
