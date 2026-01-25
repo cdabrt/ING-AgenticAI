@@ -242,7 +242,15 @@ class AgenticGraphRunner:
             return None
 
     @staticmethod
-    def _extract_json_payload(text: str) -> str | None:
+    def _sanitize_json_text(text: str) -> str:
+        if not text:
+            return text
+        cleaned = text.strip()
+        cleaned = re.sub(r",\s*([}\]])", r"\1", cleaned)
+        return cleaned
+
+    @classmethod
+    def _extract_json_payload(cls, text: str) -> str | None:
         if not text:
             return None
         if "```" in text:
@@ -253,25 +261,29 @@ class AgenticGraphRunner:
                 brace_start = fenced_body.find("{")
                 brace_end = fenced_body.rfind("}")
                 if brace_start != -1 and brace_end != -1 and brace_end > brace_start:
-                    return fenced_body[brace_start:brace_end + 1].strip()
+                    return cls._sanitize_json_text(fenced_body[brace_start:brace_end + 1])
         fenced = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL | re.IGNORECASE)
         if fenced:
-            return fenced.group(1).strip()
+            return cls._sanitize_json_text(fenced.group(1))
         decoder = json.JSONDecoder()
-        last_payload: str | None = None
+        best_payload: str | None = None
+        best_len = 0
         for match in re.finditer(r"{", text):
             start = match.start()
             try:
                 _, end = decoder.raw_decode(text[start:])
             except json.JSONDecodeError:
                 continue
-            last_payload = text[start:start + end].strip()
-        if last_payload:
-            return last_payload
+            candidate = cls._sanitize_json_text(text[start:start + end])
+            if len(candidate) > best_len:
+                best_payload = candidate
+                best_len = len(candidate)
+        if best_payload:
+            return best_payload
         last_open = text.rfind("{")
         last_close = text.rfind("}")
         if last_open != -1 and last_close != -1 and last_close > last_open:
-            return text[last_open:last_close + 1].strip()
+            return cls._sanitize_json_text(text[last_open:last_close + 1])
         return None
 
     @staticmethod
@@ -285,11 +297,16 @@ class AgenticGraphRunner:
                     parts.extend(_flatten(item))
                 return parts
             if isinstance(value, dict):
+                value_type = value.get("type")
+                if "encrypted_content" in value:
+                    return []
+                if isinstance(value_type, str) and value_type.lower() in ("reasoning", "thinking", "analysis"):
+                    return []
                 if isinstance(value.get("text"), str):
                     return [value["text"]]
                 if "content" in value:
                     return _flatten(value.get("content"))
-                return [str(value)]
+                return []
             return [str(value)]
 
         content = response.content if hasattr(response, "content") else response
@@ -325,6 +342,7 @@ class AgenticGraphRunner:
             return parsed
         if isinstance(parsed, str):
             recovered = self._extract_json_payload(parsed) or parsed
+            recovered = self._sanitize_json_text(recovered)
             try:
                 return schema.model_validate_json(recovered)
             except Exception:
@@ -378,8 +396,15 @@ class AgenticGraphRunner:
         try:
             return parser.parse(content)
         except OutputParserException as exc:
+            sanitized_content = self._sanitize_json_text(content)
+            if sanitized_content != content:
+                try:
+                    return parser.parse(sanitized_content)
+                except OutputParserException:
+                    pass
             recovered = self._extract_json_payload(content)
             if recovered:
+                recovered = self._sanitize_json_text(recovered)
                 try:
                     return parser.parse(recovered)
                 except OutputParserException:

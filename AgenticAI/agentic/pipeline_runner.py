@@ -67,6 +67,19 @@ def _get_llm_provider() -> str:
     return provider or "gemini"
 
 
+def _normalize_model_name(provider: str, model_name: str) -> str:
+    normalized = (model_name or "").strip()
+    if not normalized:
+        return normalized
+    if provider == "openrouter":
+        if "/" not in normalized and normalized.startswith("gemini-"):
+            return f"google/{normalized}"
+        return normalized
+    if provider == "gemini" and normalized.startswith("google/"):
+        return normalized.split("/", 1)[1]
+    return normalized
+
+
 def _parse_optional_bool(value: str | None) -> Optional[bool]:
     if value is None:
         return None
@@ -112,15 +125,15 @@ def _build_chat_model(
     reasoning_enabled: Optional[bool] = None,
 ) -> BaseChatModel:
     if provider == "openrouter":
-        model_kwargs = {}
+        extra_args = {}
         if reasoning_enabled is not None:
-            model_kwargs["reasoning"] = {"enabled": reasoning_enabled}
+            extra_args["reasoning"] = {"enabled": reasoning_enabled}
         return ChatOpenAI(
             model=model_name,
             temperature=temperature,
             openai_api_key=os.getenv("OPENROUTER_API_KEY"),
             openai_api_base=os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"),
-            model_kwargs=model_kwargs,
+            **extra_args,
         )
     return ChatGoogleGenerativeAI(model=model_name, temperature=temperature)
 
@@ -321,8 +334,11 @@ async def run_pipeline(args: argparse.Namespace, progress_callback: Optional[Pro
         raise ValueError("No parsed documents were found for agent processing")
     _notify("parsing", 1.0, "PDF parsing complete")
 
-    query_model_name = os.getenv("QUERY_MODEL_NAME", "gemini-2.5-flash")
-    requirements_model_name = os.getenv("REQUIREMENTS_MODEL_NAME", "gemini-2.5-pro")
+    query_model_name = os.getenv("QUERY_MODEL_NAME", "gemini-3-flash-preview")
+    requirements_model_name = os.getenv("REQUIREMENTS_MODEL_NAME", "gemini-3-flash-preview")
+
+    query_model_name = _normalize_model_name(provider, query_model_name)
+    requirements_model_name = _normalize_model_name(provider, requirements_model_name)
 
     query_reasoning_enabled = _parse_optional_bool(os.getenv("QUERY_MODEL_REASONING_ENABLED"))
     requirements_reasoning_enabled = _parse_optional_bool(os.getenv("REQUIREMENTS_MODEL_REASONING_ENABLED"))
