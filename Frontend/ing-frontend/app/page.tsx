@@ -888,9 +888,9 @@ export default function Home() {
 
       {showUploadDialog && (
         <>
-          <div className="absolute w-full h-full bg-black opacity-50 z-1000" />
-          <div className="absolute w-full h-full top-0 left-0 flex justify-center items-center pointer-events-auto z-1001">
-            <div className="w-max-80">
+          <div className="fixed inset-0 bg-gray-500 z-1000 opacity-25" onClick={() => setShowUploadDialog(false)} />
+          <div className="fixed inset-0 flex justify-center items-center pointer-events-none z-1001 p-12">
+            <div className="w-full max-w-80 pointer-events-auto">
               <FileUploadDialog
                 onUploadComplete={async () => {
                   await getPdfs();
@@ -905,11 +905,11 @@ export default function Home() {
 
       {showPdfViewer && pdfData && (
         <>
-          <div className="absolute w-full h-full bg-black opacity-50 z-1000" onClick={() => setShowPdfViewer(false)} />
-          <div className="absolute w-full h-full top-0 left-0 flex justify-center items-center pointer-events-none z-1001">
-            <div className="w-4/5 h-4/5 pointer-events-auto bg-white rounded-lg shadow-lg overflow-hidden">
+          <div className="fixed inset-0 bg-gray-500 z-1000 opacity-25" onClick={() => setShowPdfViewer(false)} />
+          <div className="fixed inset-0 flex justify-center items-center pointer-events-none z-1001 p-12">
+            <div className="w-full h-full pointer-events-auto bg-white overflow-hidden rounded-lg shadow-2xl">
               <div className="h-full flex flex-col">
-                <div className="flex justify-between items-center p-4 border-b">
+                <div className="flex justify-between items-center p-4 border-b bg-white">
                   <h2 className="text-lg font-bold">PDF Viewer</h2>
                   <Button onClick={() => setShowPdfViewer(false)} variant="outline">
                     Close
