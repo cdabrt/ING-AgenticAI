@@ -158,6 +158,10 @@ export default function Home() {
 
   function getRequirementBundles(): Promise<void> {
     setError(null);
+    const currentBundleId = selectedBundle?.id;
+    const currentRequirementId = selected?.id;
+    const currentListIndex = selectedList;
+    
     return axios.get("/api/bundles").catch((error) => {
       setError(error.message);
     }).then((response) => {
@@ -170,6 +174,29 @@ export default function Home() {
           return bundle;
         });
         setResults(bundles);
+        
+        // Restore previous selection if possible
+        if (currentBundleId) {
+          const bundle = bundles.find((b: RequirementBundle) => b.id === currentBundleId);
+          if (bundle) {
+            setSelectedBundle(bundle);
+            setSelectedList(currentListIndex);
+            
+            // Restore requirement selection
+            if (currentRequirementId && currentListIndex !== 0) {
+              const requirements = currentListIndex === 1 
+                ? bundle.business_requirements 
+                : bundle.data_requirements;
+              const requirement = requirements?.find((r: RequirementItem) => r.id === currentRequirementId);
+              if (requirement) {
+                setSelected(requirement);
+              }
+            }
+            return;
+          }
+        }
+        
+        // Fallback to first bundle if no previous selection
         if (bundles.length > 0) {
           setSelectedBundle(bundles[0]);
         }
@@ -337,6 +364,33 @@ export default function Home() {
       setShowPdfViewer(true);
     } catch (error: any) {
       setError(error.message || "Failed to load PDF");
+    }
+  }
+
+  async function openPdfByFilename(source: string): Promise<void> {
+    setError(null);
+    try {
+      // Extract filename from source (format: "filename.pdf - Section X.Y: Title")
+      const filename = source.split(" - ")[0].trim();
+      
+      const response = await axios.get(`/api/pdfs/by-filename/${encodeURIComponent(filename)}`, {
+        responseType: "arraybuffer",
+      });
+      const contentType = response.headers["content-type"] || "application/pdf";
+      const disposition = response.headers["content-disposition"] as string | undefined;
+      let displayFilename = filename;
+      if (disposition) {
+        const match = disposition.match(/filename=\"?([^\";]+)\"?/i);
+        if (match && match[1]) {
+          displayFilename = match[1];
+        }
+      }
+      const blob = new Blob([response.data], { type: contentType });
+      const file = new File([blob], displayFilename, { type: contentType });
+      setPdfData(file);
+      setShowPdfViewer(true);
+    } catch (error: any) {
+      setError(error.message || "Failed to load PDF from document source");
     }
   }
 
@@ -863,7 +917,7 @@ export default function Home() {
                       </p>
                     </div>
                     <div className="flex-1 p-4 overflow-y-auto overflow-x-hidden min-w-0">
-                      {selectedList !== 0 && <RequirementDetailView requirement={selected} />}
+                      {selectedList !== 0 && <RequirementDetailView requirement={selected} onRefresh={getRequirementBundles} onDocumentSourceClick={openPdfByFilename} />}
                       {selectedList === 0 && <BundleDetailView bundle={selectedBundle} />}
                     </div>
                   </div>

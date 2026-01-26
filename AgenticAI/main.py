@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 from datetime import datetime, timezone
 import re
@@ -10,7 +11,7 @@ from types import SimpleNamespace
 from typing import Dict, List, Optional
 from uuid import uuid4
 
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import Body, FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import Response
 from pydantic import BaseModel
 
@@ -273,6 +274,28 @@ def _get_pdf_by_id(pdf_id: int) -> Path:
     return pdfs[index]
 
 
+def _save_requirement_bundles(bundles: List[dict]) -> None:
+    OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with OUTPUT_PATH.open("w", encoding="utf-8") as handle:
+        json.dump(bundles, handle, indent=2)
+
+
+def _find_requirement_in_bundles(bundles: List[dict], requirement_id: str) -> tuple[dict, dict, int] | None:
+    """Find requirement by ID in bundles. Returns (bundle, requirement, bundle_index) or None."""
+    for bundle_idx, bundle in enumerate(bundles):
+        if not isinstance(bundle, dict):
+            continue
+        # Search across all requirement categories (business_requirements, data_requirements, etc.)
+        for key in bundle.keys():
+            if key.endswith("_requirements") or key == "requirements":
+                requirements = bundle.get(key, [])
+                if isinstance(requirements, list):
+                    for req in requirements:
+                        if isinstance(req, dict) and req.get("id") == requirement_id:
+                            return bundle, req, bundle_idx
+    return None
+
+
 @app.get("/")
 def read_root():
     return {"status": "ok"}
@@ -473,6 +496,26 @@ class HighlightPayload(BaseModel):
     limit: int = 5
 
 
+class RequirementUpdatePayload(BaseModel):
+    id: str
+    description: str
+    rationale: str
+    document_sources: List[str]
+    online_sources: List[str]
+
+
+class SourcesPayload(BaseModel):
+    source: str
+
+
+class OnlineSourcesPayload(BaseModel):
+    source: str
+
+
+class RemoveSourcePayload(BaseModel):
+    source: str
+
+
 @app.post("/api/embeddings")
 async def run_embedding(payload: EmbeddingPayload | None = None):
     if PIPELINE_LOCK.locked():
@@ -601,6 +644,101 @@ def get_requirement_bundles():
     return _load_requirement_bundles()
 
 
+@app.put("/api/requirements/{requirement_id}")
+def update_requirement(requirement_id: str, payload: RequirementUpdatePayload):
+    bundles = _load_requirement_bundles()
+    logging.error(f"Updating requirement {requirement_id} with payload: {payload}")
+    result = _find_requirement_in_bundles(bundles, requirement_id)
+    
+    if not result:
+        raise HTTPException(status_code=404, detail="Requirement not found")
+    
+    _, requirement, _ = result
+    
+    # Update fields
+    requirement["description"] = payload.description
+    requirement["rationale"] = payload.rationale
+    requirement["document_sources"] = payload.document_sources
+    requirement["online_sources"] = payload.online_sources
+    
+    _save_requirement_bundles(bundles)
+    return requirement
+
+
+@app.post("/api/requirements/{requirement_id}/sources")
+def add_document_source(requirement_id: str, payload: SourcesPayload):
+    bundles = _load_requirement_bundles()
+    result = _find_requirement_in_bundles(bundles, requirement_id)
+    
+    if not result:
+        raise HTTPException(status_code=404, detail="Requirement not found")
+    
+    _, requirement, _ = result
+    document_sources = requirement.get("document_sources", [])
+    if payload.source not in document_sources:
+        document_sources.append(payload.source)
+        requirement["document_sources"] = document_sources
+        _save_requirement_bundles(bundles)
+    
+    return {"document_sources": requirement["document_sources"]}
+
+
+@app.delete("/api/requirements/{requirement_id}/sources")
+def remove_document_source(requirement_id: str, payload: RemoveSourcePayload = Body(...)):
+    bundles = _load_requirement_bundles()
+    result = _find_requirement_in_bundles(bundles, requirement_id)
+    
+    if not result:
+        raise HTTPException(status_code=404, detail="Requirement not found")
+    
+    _, requirement, _ = result
+    
+    document_sources = requirement.get("document_sources", [])
+    if payload.source in document_sources:
+        document_sources.remove(payload.source)
+        requirement["document_sources"] = document_sources
+        _save_requirement_bundles(bundles)
+    
+    return {"document_sources": requirement["document_sources"]}
+
+
+@app.post("/api/requirements/{requirement_id}/online-sources")
+def add_online_source(requirement_id: str, payload: OnlineSourcesPayload):
+    bundles = _load_requirement_bundles()
+    result = _find_requirement_in_bundles(bundles, requirement_id)
+    
+    if not result:
+        raise HTTPException(status_code=404, detail="Requirement not found")
+    
+    _, requirement, _ = result
+    online_sources = requirement.get("online_sources", [])
+    if payload.source not in online_sources:
+        online_sources.append(payload.source)
+        requirement["online_sources"] = online_sources
+        _save_requirement_bundles(bundles)
+    
+    return {"online_sources": requirement["online_sources"]}
+
+
+@app.delete("/api/requirements/{requirement_id}/online-sources")
+def remove_online_source(requirement_id: str, payload: RemoveSourcePayload = Body(...)):
+    bundles = _load_requirement_bundles()
+    result = _find_requirement_in_bundles(bundles, requirement_id)
+    
+    if not result:
+        raise HTTPException(status_code=404, detail="Requirement not found")
+    
+    _, requirement, _ = result
+    
+    online_sources = requirement.get("online_sources", [])
+    if payload.source in online_sources:
+        online_sources.remove(payload.source)
+        requirement["online_sources"] = online_sources
+        _save_requirement_bundles(bundles)
+    
+    return {"online_sources": requirement["online_sources"]}
+
+
 @app.post("/api/upload")
 async def upload_file(file: UploadFile = File(...)):
     if file.content_type != "application/pdf" and not file.filename.lower().endswith(".pdf"):
@@ -632,6 +770,19 @@ def get_pdfs():
             }
         )
     return results
+
+
+@app.get("/api/pdfs/by-filename/{filename}")
+def get_pdf_by_filename(filename: str):
+    pdfs = _list_pdfs()
+    for path in pdfs:
+        if path.name == filename:
+            return Response(
+                content=path.read_bytes(),
+                media_type="application/pdf",
+                headers={"Content-Disposition": f'inline; filename="{path.name}"'},
+            )
+    raise HTTPException(status_code=404, detail=f"PDF '{filename}' not found")
 
 
 @app.get("/api/pdfs/{pdf_id}")
