@@ -57,6 +57,9 @@ services:
     ports:
       - "3000:3000"
     container_name: frontend
+    depends_on:
+      backend:
+        condition: service_healthy
 
   backend:
     build:
@@ -71,5 +74,9 @@ services:
       - ./data:/app/data
       - ./artifacts:/app/artifacts
     depends_on:
-      - frontend
       - milvus
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/').read()\""]
+      interval: 5s
+      timeout: 3s
+      retries: 12
