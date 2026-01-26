@@ -1,0 +1,243 @@
+direction: down
+
+vars: {
+    # Frontend colors (blue)
+    frontend-fill: "#dae8fc"
+    frontend-stroke: "#6c8ebf"
+    
+    # Backend colors (green)
+    backend-fill: "#d5e8d4"
+    backend-stroke: "#82b366"
+    
+    # AgenticAI/ML colors (yellow)
+    ai-fill: "#fff2cc"
+    ai-stroke: "#d6b656"
+    
+    # MCP Server colors (purple)
+    mcp-fill: "#e1d5e7"
+    mcp-stroke: "#9673a6"
+    
+    # Storage colors (orange)
+    storage-fill: "#ffe6cc"
+    storage-stroke: "#d79b00"
+    
+    # External services (pink)
+    external-fill: "#f8cecc"
+    external-stroke: "#b85450"
+    
+    # User
+    user-fill: "#1ba1e2"
+    user-stroke: "#006EAF"
+
+    d2-config: {
+        layout-engine: elk
+    }
+}
+
+# User
+user: {
+    shape: person
+    label: "Business Analyst"
+    style.fill: ${user-fill}
+    style.stroke: ${user-stroke}
+}
+
+# Frontend Layer
+frontend: {
+    label: "Frontend Layer"
+    style.fill: ${frontend-fill}
+    style.stroke: ${frontend-stroke}
+    style.stroke-width: 3
+    style.stroke-dash: 5
+    
+    nextjs: {
+        label: "Next.js Application\n(TypeScript + React)"
+        shape: rectangle
+        style.fill: ${frontend-fill}
+        style.stroke: ${frontend-stroke}
+        
+        ui: {
+            label: "UI Components\n• Document Upload\n• Requirements View\n• Evidence Display"
+            shape: rectangle
+            style.fill: ${frontend-fill}
+            style.stroke: ${frontend-stroke}
+        }
+    }
+}
+
+# Backend API Layer
+backend_api: {
+    label: "Backend API Layer"
+    style.fill: ${backend-fill}
+    style.stroke: ${backend-stroke}
+    style.stroke-width: 3
+    style.stroke-dash: 5
+    
+    fastapi: {
+        label: "FastAPI Server\n(Python)"
+        shape: rectangle
+        style.fill: ${backend-fill}
+        style.stroke: ${backend-stroke}
+        
+        endpoints: {
+            label: "REST Endpoints\n• /bundles\n• /pdfs\n• /requirements"
+            shape: rectangle
+            style.fill: ${backend-fill}
+            style.stroke: ${backend-stroke}
+        }
+    }
+    
+    database: {
+        label: "PostgreSQL\nDatabase"
+        shape: cylinder
+        style.fill: ${backend-fill}
+        style.stroke: ${backend-stroke}
+    }
+}
+
+# Agentic AI Processing Layer
+agentic_ai: {
+    label: "Agentic AI Processing Layer"
+    style.fill: ${ai-fill}
+    style.stroke: ${ai-stroke}
+    style.stroke-width: 3
+    style.stroke-dash: 5
+    
+    orchestrator: {
+        label: "Pipeline Runner\n• Document Orchestration\n• Agent Coordination"
+        shape: rectangle
+        style.fill: ${ai-fill}
+        style.stroke: ${ai-stroke}
+    }
+    
+    langgraph: {
+        label: "LangGraph Agents\n• Query Agent (Gemini Flash)\n• Context Assessor\n• Requirements Agent (Gemini Pro)"
+        shape: rectangle
+        style.fill: ${ai-fill}
+        style.stroke: ${ai-stroke}
+    }
+    
+    ingestion: {
+        label: "Ingestion Pipeline\n• PDF Parser\n• Chunker\n• Vector Embedder"
+        shape: rectangle
+        style.fill: ${ai-fill}
+        style.stroke: ${ai-stroke}
+    }
+    
+    logger: {
+        label: "Decision Logger\n• Audit Trail\n• JSONL Events"
+        shape: rectangle
+        style.fill: ${ai-fill}
+        style.stroke: ${ai-stroke}
+    }
+}
+
+# MCP Tooling Layer
+mcp_layer: {
+    label: "MCP Tooling Layer"
+    style.fill: ${mcp-fill}
+    style.stroke: ${mcp-stroke}
+    style.stroke-width: 3
+    style.stroke-dash: 5
+    
+    mcp_client: {
+        label: "MCP Client\n(Tool Gateway)"
+        shape: rectangle
+        style.fill: ${mcp-fill}
+        style.stroke: ${mcp-stroke}
+    }
+    
+    regulation_server: {
+        label: "Regulation MCP Server\n• retrieve_chunks\n• web_search\n• fetch_web_page"
+        shape: rectangle
+        style.fill: ${mcp-fill}
+        style.stroke: ${mcp-stroke}
+    }
+}
+
+# Storage Layer
+storage: {
+    label: "Storage Layer"
+    style.fill: ${storage-fill}
+    style.stroke: ${storage-stroke}
+    style.stroke-width: 3
+    style.stroke-dash: 5
+    
+    vector_store: {
+        label: "Vector Store\n(FAISS / Milvus)"
+        shape: cylinder
+        style.fill: ${storage-fill}
+        style.stroke: ${storage-stroke}
+    }
+    
+    artifacts: {
+        label: "Artifacts\n• requirements.json\n• requirements.pdf\n• agent_decisions.jsonl"
+        shape: rectangle
+        style.fill: ${storage-fill}
+        style.stroke: ${storage-stroke}
+    }
+}
+
+# External Services
+external: {
+    label: "External Services"
+    style.fill: ${external-fill}
+    style.stroke: ${external-stroke}
+    style.stroke-width: 3
+    style.stroke-dash: 5
+    
+    gemini: {
+        label: "Google Gemini API\n• Flash (query/context)\n• Pro (requirements)"
+        shape: cloud
+        style.fill: ${external-fill}
+        style.stroke: ${external-stroke}
+    }
+    
+    ddg: {
+        label: "DuckDuckGo\n• Web Search\n• Page Fetch"
+        shape: cloud
+        style.fill: ${external-fill}
+        style.stroke: ${external-stroke}
+    }
+}
+
+# Connections
+
+# User to Frontend
+user -> frontend.nextjs.ui: "Uploads PDFs,\nviews requirements"
+
+# Frontend to Backend API
+frontend.nextjs -> backend_api.fastapi.endpoints: "HTTP/REST API"
+
+# Backend API to Database
+backend_api.fastapi -> backend_api.database: "Store/retrieve\nbundles & PDFs"
+
+# Backend API to Agentic AI
+backend_api.fastapi -> agentic_ai.orchestrator: "Trigger processing"
+
+# Agentic AI internal flow
+agentic_ai.orchestrator -> agentic_ai.ingestion: "PDF ingestion"
+agentic_ai.orchestrator -> agentic_ai.langgraph: "Execute agents"
+agentic_ai.langgraph -> agentic_ai.logger: "Log decisions"
+
+# Agentic AI to MCP Layer
+agentic_ai.langgraph -> mcp_layer.mcp_client: "Tool calls"
+mcp_layer.mcp_client -> mcp_layer.regulation_server: "MCP stdio\nprotocol"
+
+# MCP to Storage
+mcp_layer.regulation_server -> storage.vector_store: "Retrieve\nchunks"
+
+# Ingestion to Storage
+agentic_ai.ingestion -> storage.vector_store: "Persist\nembeddings"
+agentic_ai.orchestrator -> storage.artifacts: "Write outputs"
+
+# MCP to External
+mcp_layer.regulation_server -> external.ddg: "Web search\n& fetch"
+
+# Agentic AI to External
+agentic_ai.langgraph -> external.gemini: "LLM inference"
+
+# Storage to Backend (read artifacts)
+storage.artifacts -> backend_api.fastapi: "Read requirements" {
+    style.stroke-dash: 5
+}

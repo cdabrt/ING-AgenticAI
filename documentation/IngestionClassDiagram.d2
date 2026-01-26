@@ -1,0 +1,284 @@
+direction: down
+
+vars: {
+    # Class colors
+    main-fill: "#dae8fc"
+    main-stroke: "#6c8ebf"
+    main-bg: "#eff6fd"
+    
+    # Interface/Abstract colors
+    interface-fill: "#e1d5e7"
+    interface-stroke: "#9673a6"
+    interface-bg: "#f2ebf5"
+    
+    # Model colors
+    model-fill: "#d5e8d4"
+    model-stroke: "#82b366"
+    model-bg: "#eaf5ea"
+    
+    # Enum colors
+    enum-fill: "#fff2cc"
+    enum-stroke: "#d6b656"
+    
+    # Store implementations
+    store-fill: "#ffe6cc"
+    store-stroke: "#d79b00"
+
+    d2-config: {
+        layout-engine: elk
+    }
+}
+
+# Models Layer
+models: {
+    label: "Data Models (Pydantic)"
+    style.stroke-width: 2
+    style.stroke-dash: 5
+    style.fill: ${model-bg}
+    style.stroke: ${model-stroke}
+    
+    ElementType: {
+        shape: class
+        label: "<<enum>>\nElementType"
+        style.fill: ${enum-fill}
+        style.stroke: ${enum-stroke}
+        "+ HEADING: str"
+        "+ PARAGRAPH: str"
+        "+ TABLE: str"
+    }
+    
+    Metadata: {
+        shape: class
+        label: "Metadata"
+        style.fill: ${model-fill}
+        style.stroke: ${model-stroke}
+        "+ source: str"
+        "+ page: int"
+        "+ type: ElementType"
+    }
+    
+    Document: {
+        shape: class
+        label: "Document"
+        style.fill: ${model-fill}
+        style.stroke: ${model-stroke}
+        "+ page_content: str"
+        "+ meta_data: Metadata"
+    }
+    
+    Chunk: {
+        shape: class
+        label: "Chunk"
+        style.fill: ${model-fill}
+        style.stroke: ${model-stroke}
+        "+ chunk_id: str"
+        "+ document: Document"
+        "+ char_start: int"
+        "+ char_end: int"
+        "+ parent_heading: Optional[str]"
+    }
+}
+
+# Processing Layer
+processing: {
+    label: "Document Processing"
+    style.stroke-width: 2
+    style.stroke-dash: 5
+    style.fill: ${main-bg}
+    style.stroke: ${main-stroke}
+    
+    PDFParser: {
+        shape: class
+        label: "PDFParser"
+        style.fill: ${main-fill}
+        style.stroke: ${main-stroke}
+        "+ parse_pdf(file_path: str): List[Document]" : ""
+        "- _analyze_page_fonts(words): Dict" : ""
+        "- _is_likely_heading(word, stats): bool" : ""
+        "- _extract_tables(page): List[str]" : ""
+        "- _classify_paragraph(text): ElementType" : ""
+    }
+    
+    Chunker: {
+        shape: class
+        label: "Chunker"
+        style.fill: ${main-fill}
+        style.stroke: ${main-stroke}
+        "+ chunk_documents(docs: List[Document], chunk_size, overlap): List[Chunk]" : ""
+        "- _chunk_table(text, size, overlap): List[str]" : ""
+        "- _chunk_paragraph(buffer, meta, size, overlap): Tuple" : ""
+        "- _split_sentence(text): List[str]" : ""
+    }
+}
+
+# Vectorization Layer
+vectorization: {
+    label: "Vectorization"
+    style.stroke-width: 2
+    style.stroke-dash: 5
+    style.fill: ${main-bg}
+    style.stroke: ${main-stroke}
+    
+    VectorEmbedder: {
+        shape: class
+        label: "VectorEmbedder"
+        style.fill: ${main-fill}
+        style.stroke: ${main-stroke}
+        "- model_name: str"
+        "- model: SentenceTransformer"
+        "+ __init__(model_name: Optional[str])" : ""
+        "+ embed_vectors_in_chunks(chunks): Tuple[int, List[Dict]]" : ""
+        "+ embed_queries(queries: List[str]): ndarray" : ""
+    }
+}
+
+# Vector Store Layer
+vectorstore: {
+    label: "Vector Store (Persistence)"
+    style.stroke-width: 2
+    style.stroke-dash: 5
+    style.fill: ${interface-bg}
+    style.stroke: ${interface-stroke}
+    
+    IVectorStore: {
+        shape: class
+        label: "<<interface>>\nIVectorStore"
+        style.fill: ${interface-fill}
+        style.stroke: ${interface-stroke}
+        "+ dimensions: int"
+        "+ use_cosine_similarity: bool"
+        "+ __init__(dimensions, use_cosine_similarity)" : ""
+        "+ store_embeds_and_metadata(chunks): void*" : ""
+        "+ top_k_search(query_embedding, top_k): List[Dict]*" : ""
+    }
+    
+    FAISSStore: {
+        shape: class
+        label: "FAISSStore"
+        style.fill: ${store-fill}
+        style.stroke: ${store-stroke}
+        "- index: faiss.Index"
+        "- chunk_store: List[Chunk]"
+        "+ store_embeds_and_metadata(chunks): void" : ""
+        "+ top_k_search(query_embedding, top_k): List[Dict]" : ""
+        "+ persist(directory: str): void" : ""
+        "+ load(directory: str): FAISSStore" : ""
+    }
+    
+    MilvusStore: {
+        shape: class
+        label: "MilvusStore"
+        style.fill: ${store-fill}
+        style.stroke: ${store-stroke}
+        "- collection_name: str"
+        "- collection: Collection"
+        "- enable_hybrid: bool"
+        "+ store_embeds_and_metadata(chunks): void" : ""
+        "+ top_k_search(query_embedding, top_k): List[Dict]" : ""
+        "+ collection_exists(name): bool" : ""
+        "+ from_env(dimensions): MilvusStore" : ""
+    }
+}
+
+# Orchestration
+ingestion: {
+    label: "Ingestion Pipeline"
+    style.stroke-width: 2
+    style.stroke-dash: 5
+    style.fill: ${main-bg}
+    style.stroke: ${main-stroke}
+    
+    IngestionFunctions: {
+        shape: class
+        label: "ingestion.py"
+        style.fill: ${main-fill}
+        style.stroke: ${main-stroke}
+        "+ ingest_documents(data_dir, persist_dir, ...): Dict" : ""
+        "+ vector_store_exists(persist_dir): bool" : ""
+        "- _ingest_documents_faiss(...): Dict" : ""
+        "- _ingest_documents_milvus(...): Dict" : ""
+        "- _batched_chunks(chunks, batch_size): Iterator" : ""
+    }
+}
+
+# Relationships
+
+# Model associations
+models.Document -> models.Metadata: "tracked by meta_data" {
+    source-arrowhead: 1
+    target-arrowhead: 1
+}
+models.Chunk -> models.Document: "wraps content as document" {
+    source-arrowhead: 1
+    target-arrowhead: 1
+}
+models.Metadata -> models.ElementType: "categorized by type" {
+    source-arrowhead: 1
+    target-arrowhead: 1
+}
+
+# Processing dependencies
+processing.PDFParser -> models.Document: "outputs parsed Documents" {
+    style.stroke-dash: 5
+}
+processing.PDFParser -> models.Metadata: "attaches source/page/type" {
+    style.stroke-dash: 5
+}
+processing.PDFParser -> models.ElementType: "detects headings/paragraphs/tables" {
+    style.stroke-dash: 5
+}
+processing.Chunker -> models.Document: "splits Documents by size/overlap" {
+    style.stroke-dash: 5
+}
+processing.Chunker -> models.Chunk: "outputs list of fixed-size" {
+    style.stroke-dash: 5
+}
+processing.Chunker -> models.ElementType: "handles table rows vs paragraphs" {
+    style.stroke-dash: 5
+}
+
+# Vectorization
+vectorization.VectorEmbedder -> models.Chunk: "encodes text into embeddings" {
+    style.stroke-dash: 5
+}
+
+# Store interface
+vectorstore.FAISSStore -> vectorstore.IVectorStore: "implements" {
+    style.stroke-dash: 5
+    style.stroke-width: 6
+    target-arrowhead.shape: triangle
+    target-arrowhead.style.filled: false
+}
+vectorstore.MilvusStore -> vectorstore.IVectorStore: "implements" {
+    style.stroke-dash: 5
+    style.stroke-width: 6
+    target-arrowhead.shape: triangle
+    target-arrowhead.style.filled: false
+}
+
+# Store associations
+vectorstore.FAISSStore -> models.Chunk: "persists in-memory chunk_store[]" {
+    source-arrowhead: 1
+    target-arrowhead: "*"
+}
+vectorstore.MilvusStore -> models.Chunk: "persists in Collection" {
+    source-arrowhead: 1
+    target-arrowhead: "*"
+}
+
+# Ingestion dependencies
+ingestion.IngestionFunctions -> processing.PDFParser: "invokes to parse PDFs" {
+    style.stroke-dash: 5
+}
+ingestion.IngestionFunctions -> processing.Chunker: "invokes to split Documents" {
+    style.stroke-dash: 5
+}
+ingestion.IngestionFunctions -> vectorization.VectorEmbedder: "invokes to generate embeddings" {
+    style.stroke-dash: 5
+}
+ingestion.IngestionFunctions -> vectorstore.FAISSStore: "instantiates/loads for dev" {
+    style.stroke-dash: 5
+}
+ingestion.IngestionFunctions -> vectorstore.MilvusStore: "instantiates/loads for prod" {
+    style.stroke-dash: 5
+}
