@@ -366,9 +366,14 @@ async def run_pipeline(args: argparse.Namespace, progress_callback: Optional[Pro
     decision_logger = DecisionLogger(args.decision_log)
 
     server_script = args.server_script
-    server_env = {"VECTOR_STORE_DIR": str(Path(vector_dir).resolve())}
+    server_env = os.environ.copy()
+    server_env["VECTOR_STORE_DIR"] = str(Path(vector_dir).resolve())
+    visible_env = {
+        "VECTOR_STORE_DIR": server_env["VECTOR_STORE_DIR"],
+        "RERANKER_ENABLED": server_env.get("RERANKER_ENABLED"),
+    }
     _notify("mcp_start", 0.0, "Starting MCP server")
-    logger.info("Starting MCP server script=%s with env=%s", server_script, server_env)
+    logger.info("Starting MCP server script=%s with env=%s", server_script, visible_env)
 
     async with MCPToolClient(server_script=server_script, env=server_env) as mcp_client:
         _notify("mcp_start", 1.0, "MCP server ready")
