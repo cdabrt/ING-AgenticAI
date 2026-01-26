@@ -1083,47 +1083,136 @@ class AgenticGraphRunner:
     ) -> WebContentDecision:
         parser = PydanticOutputParser(pydantic_object=WebContentDecision)
         format_instructions = parser.get_format_instructions()
-        prompt = ChatPromptTemplate.from_messages(
-            [
-                (
-                    "system",
-                    "You are vetting fetched web pages for a regulatory requirements agent."
-                    " Include the page only if it adds concrete obligations, thresholds, or authoritative context"
-                    " that complements the base document. Provide a focused summary when you approve it.",
-                ),
-                (
-                    "human",
-                    "Document summary: {summary}\nDocument type: {doc_type}\nQuery: {query}\n"
-                    "URL: {url}\nTitle: {title}\nSnippet: {snippet}\nContent: {content}\n\n{format_instructions}",
-                ),
-            ]
-        )
-        chain = prompt | self.query_model
-        decision: WebContentDecision = await self._ainvoke_with_parser(
-            chain=chain,
-            parser=parser,
-            payload={
-                "summary": document_summary,
-                "doc_type": document_type,
-                "query": query,
-                "url": candidate.href or "unknown",
-                "title": candidate.title or "",
-                "snippet": candidate.snippet or "",
-                "content": content,
-                "format_instructions": format_instructions,
-            },
-            limiter=self.query_rate_limiter,
-            model_label="query_model",
-            max_retries=int(os.getenv("GEMINI_MAX_RETRIES", "3")),
-            parse_label="web_content_decision",
-            log_context={"doc_source": document_summary[:80], "query": query},
-        )
-        self._emit_llm_status(
-            step="web_content_eval",
-            doc_source=doc_source,
-            detail=candidate.href or candidate.title,
-        )
+        correction_note = ""
+        for attempt in range(1, 3):
+            prompt = ChatPromptTemplate.from_messages(
+                [
+                    (
+                        "system",
+                        "You are vetting fetched web pages for a regulatory requirements agent."
+                        " Include the page only if it adds concrete obligations, thresholds, or authoritative context"
+                        " that complements the base document. Provide a focused summary when you approve it."
+                        " Always follow the JSON schema in the format instructions and do not reinterpret or reformat those fields."
+                        " Summary must always be a plain-text string that highlights the most relevant insight.",
+                    ),
+                    (
+                        "human",
+                        "Document summary: {summary}\nDocument type: {doc_type}\nQuery: {query}\n"
+                        "URL: {url}\nTitle: {title}\nSnippet: {snippet}\nContent: {content}{correction_note}\n\n{format_instructions}",
+                    ),
+                ]
+            )
+            chain = prompt | self.query_model
+            try:
+                decision: WebContentDecision = await self._ainvoke_with_parser(
+                    chain=chain,
+                    parser=parser,
+                    payload={
+                        "summary": document_summary,
+                        "doc_type": document_type,
+                        "query": query,
+                        "url": candidate.href or "unknown",
+                        "title": candidate.title or "",
+                        "snippet": candidate.snippet or "",
+                        "content": content,
+                        "format_instructions": format_instructions,
+                        "correction_note": correction_note,
+                    },
+                    limiter=self.query_rate_limiter,
+                    model_label="query_model",
+                    max_retries=int(os.getenv("GEMINI_MAX_RETRIES", "3")),
+                    parse_label="web_content_decision",
+                    log_context={"doc_source": document_summary[:80], "query": query},
+                )
+                self._emit_llm_status(
+                    step="web_content_eval",
+                    doc_source=doc_source,
+                    detail=candidate.href or candidate.title,
+                )
+                return self._ensure_web_content_summary(decision, candidate, content)
+            except OutputParserException as exc:
+                if attempt == 1:
+                    correction_note = self._build_web_content_correction_note(str(exc))
+                    await self._log_event(
+                        "web_content_decision_error",
+                        {
+                            "doc_source": document_summary[:80],
+                            "query": query,
+                            "error": str(exc),
+                            "attempt": attempt,
+                        },
+                    )
+                    continue
+                fallback_summary = self._build_web_content_fallback_summary(candidate, content)
+                await self._log_event(
+                    "web_content_decision_error",
+                    {
+                        "doc_source": document_summary[:80],
+                        "query": query,
+                        "error": str(exc),
+                        "fallback_summary": fallback_summary,
+                        "attempt": attempt,
+                    },
+                )
+                return WebContentDecision(
+                    include=False,
+                    rationale="Parsing failed for the WebContentDecision; excluding the page.",
+                    summary=fallback_summary,
+                )
+            except Exception as exc:  # noqa: BLE001 - keep pipeline resilient
+                fallback_summary = self._build_web_content_fallback_summary(candidate, content)
+                await self._log_event(
+                    "web_content_decision_error",
+                    {
+                        "doc_source": document_summary[:80],
+                        "query": query,
+                        "error": f"Unexpected failure: {exc}",
+                        "fallback_summary": fallback_summary,
+                        "attempt": attempt,
+                    },
+                )
+                return WebContentDecision(
+                    include=False,
+                    rationale="Unexpected error while evaluating web content; excluding the page.",
+                    summary=fallback_summary,
+                )
+            else:
+                decision_summary = decision.summary
+                if not isinstance(decision_summary, str) or not decision_summary.strip():
+                    decision.summary = self._build_web_content_fallback_summary(candidate, content)
+                return decision
+
+    def _build_web_content_fallback_summary(self, candidate: WebSourceCandidate, content: str) -> str:
+        sources = [candidate.snippet, candidate.title]
+        for snippet in sources:
+            if snippet:
+                text = snippet.strip()
+                if text:
+                    return text if len(text) <= 280 else f"{text[:277]}..."
+        normalized_content = " ".join(content.split())
+        if normalized_content:
+            return normalized_content if len(normalized_content) <= 280 else f"{normalized_content[:277]}..."
+        return "Unable to summarize the page."
+
+    def _ensure_web_content_summary(
+        self,
+        decision: WebContentDecision,
+        candidate: WebSourceCandidate,
+        content: str,
+    ) -> WebContentDecision:
+        summary = decision.summary
+        if isinstance(summary, str) and summary.strip():
+            return decision
+        decision.summary = self._build_web_content_fallback_summary(candidate, content)
         return decision
+
+    def _build_web_content_correction_note(self, error_message: str) -> str:
+        normalized = " ".join(error_message.split())
+        snippet = normalized if len(normalized) <= 240 else f"{normalized[:237]}..."
+        return (
+            f"\nPrevious response failed parsing with error: {snippet}"
+            " Make sure to obey the JSON schema exactly and keep the `summary` field as a plain-text string."
+        )
 
     async def _requirements_node(
         self,

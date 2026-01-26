@@ -50,7 +50,7 @@ class WebSelectionResponse(BaseModel):
 class WebContentDecision(BaseModel):
     include: bool = Field(..., description="Whether the cleaned page should augment context")
     rationale: str = Field(..., description="Justification for including or dropping the page")
-    summary: str = Field(..., description="Two-sentence synopsis highlighting the relevant insight")
+    summary: str | None = Field(None, description="Two-sentence synopsis highlighting the relevant insight")
 
 
 class ContextAssessment(BaseModel):

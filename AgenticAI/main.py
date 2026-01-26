@@ -281,11 +281,12 @@ def _save_requirement_bundles(bundles: List[dict]) -> None:
 
 
 def _find_requirement_in_bundles(bundles: List[dict], requirement_id: str) -> tuple[dict, dict, int] | None:
-    """Find requirement by ID in bundles. Returns (bundle, requirement, bundle_index) or None."""
-    for bundle_idx, bundle in enumerate(bundles):
+    """Find requirement by ID in bundles. Returns (bundle, requirement, bundle_index) or None.
+    Bundles are checked backwards so the most recent run is updated first."""
+    for bundle_idx in range(len(bundles) - 1, -1, -1):
+        bundle = bundles[bundle_idx]
         if not isinstance(bundle, dict):
             continue
-        # Search across all requirement categories (business_requirements, data_requirements, etc.)
         for key in bundle.keys():
             if key.endswith("_requirements") or key == "requirements":
                 requirements = bundle.get(key, [])
