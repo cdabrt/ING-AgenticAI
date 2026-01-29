@@ -1,5 +1,3 @@
-# TODO: Setup docker container if necessary later
-
 from setuptools import setup, find_packages
 
 setup(
@@ -10,7 +8,6 @@ setup(
         "pdfplumber",
         "sentence-transformers",
         "numpy",
-        # Using the BaseModel superclass from pydantic to json serialize chunks and documents with ease with type validation.
         "pydantic",
         "faiss-cpu",
         "langchain",
