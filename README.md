@@ -29,7 +29,7 @@ This process is slow, expensive, and error‑prone. Missing a single obligation 
 ING-AgenticAI automates regulatory analysis with a multi‑agent RAG pipeline:
 
 - Agentic reasoning for document understanding and requirement synthesis
-- Semantic retrieval over ingested PDFs with FAISS and SentenceTransformers
+- Semantic retrieval over ingested PDFs with Milvus and SentenceTransformers
 - Open‑web enrichment behind a controlled MCP boundary
 - Full audit logging of every retrieval, decision, and source used
 - Structured outputs designed for both machines (JSON) and stakeholders (PDF)
@@ -150,7 +150,7 @@ Only approved sources are added to the context, and every decision is logged.
 	```
 
 	The runner will:
-	- rebuild the FAISS store (unless it already exists and `--rebuild-store` is omitted),
+	- rebuild the Milvus collection (unless it already exists and `--rebuild-store` is omitted),
 	- start the MCP regulation server automatically,
 	- execute the LangGraph pipeline per document,
 	- persist the JSON requirements bundle to `artifacts/requirements.json` and a formatted PDF to `artifacts/requirements.pdf` (configurable via `--pdf-output`).
@@ -159,29 +159,18 @@ Only approved sources are added to the context, and every decision is logged.
 
 	Open `artifacts/requirements.json` (machine readable) or `artifacts/requirements.pdf` (business friendly) to review requirements with citations to document chunks and web sources.
 
-## Visualizing the JSON output
-
-For a friendlier view of the generated requirements, a static viewer lives under `visualizer/index.html`.
-
-1. Serve the repository root (so the page can fetch `artifacts/requirements.json` and the source PDFs):
-
-	```bash
-	python -m http.server 8000
-	```
-
-2. Open `http://localhost:8000/visualizer/` in a browser. The UI lists business and data requirements, shows rationales, and renders document/online sources as clickable pills. Document citations link back to the PDF page, while online sources open the captured URLs.
 
 ## Useful CLI flags
 
 - `--rebuild-store` – force ingestion even if a vector store already exists.
-- `--top-k` – number of FAISS chunks fetched per query (default 15).
+- `--top-k` – number of chunks fetched per query (default 15).
 - `--server-script` – run a custom MCP server implementation if needed.
 - `--output` – change the output JSON path.
 - `--pdf-output` – change where the PDF rendering is stored (default `artifacts/requirements.pdf`).
 
 ## Project layout
 
-- `AgenticAI/pipeline/ingestion.py` – ingestion and FAISS persistence helpers.
+- `AgenticAI/pipeline/ingestion.py` – ingestion and Milvus persistence helpers.
 - `AgenticAI/mcp_servers/regulation_server.py` – FastMCP server exposing retrieval, metadata search, and fetch tools.
 - `AgenticAI/mcp/client.py` – lightweight stdio MCP client for the LangGraph runner.
 - `AgenticAI/agentic/*` – document grouping utilities, Pydantic schemas, and LangGraph orchestration.
