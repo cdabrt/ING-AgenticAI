@@ -1,8 +1,10 @@
 from typing import List, Dict
+from warnings import deprecated
+
 from sentence_transformers import SentenceTransformer
 from AgenticAI.Chunker.Chunk import Chunk
 
-
+@deprecated('do not used any longer')
 class VectorEmbedder:
     def __init__(self, model_name:str = "all-MiniLM-L6-v2"):
         self.model = SentenceTransformer(model_name)
